@@ -36,7 +36,7 @@ class Confession(commands.Cog):
             with open(self.data_file, "r", encoding="utf-8") as f:
                 self.guild_data = json.load(f)
         except Exception as e:
-            log.error("Failed to load confessions file: %s", e)
+            logger.error("Failed to load confessions file: %s", e)
             self.guild_data = {}
 
     def _save(self):
@@ -44,7 +44,7 @@ class Confession(commands.Cog):
             with open(self.data_file, "w", encoding="utf-8") as f:
                 json.dump(self.guild_data, f, indent=4)
         except Exception as e:
-            log.error("Failed to save confessions file: %s", e)
+            logger.error("Failed to save confessions file: %s", e)
 
     def _get_guild_cfg(self, guild: discord.Guild) -> dict:
         gid = str(guild.id)
@@ -184,4 +184,4 @@ class Confession(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Confession(bot))
-    log.info("Loaded Confession cog")
+    logger.info("Loaded Confession cog")

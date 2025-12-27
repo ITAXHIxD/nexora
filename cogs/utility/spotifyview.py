@@ -16,7 +16,7 @@ class SpotifyStatus(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        log.info("%s loaded", self.__class__.__name__)
+        logger.info("%s loaded", self.__class__.__name__)
 
     @commands.hybrid_command(
         name="spotify",
@@ -149,4 +149,4 @@ class SpotifyView(discord.ui.View):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(SpotifyStatus(bot))
-    log.info("Loaded %s", SpotifyStatus.__name__)
+    logger.info("Loaded %s", SpotifyStatus.__name__)

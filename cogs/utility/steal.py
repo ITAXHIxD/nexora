@@ -195,7 +195,7 @@ class Steal(commands.Cog):
                 if r.status == 200:
                     return await r.read()
         except Exception as e:
-            log.error("Download error: %s", e)
+            logger.error("Download error: %s", e)
         return None
 
     def parse_emojis(self, text: str) -> List[dict]:

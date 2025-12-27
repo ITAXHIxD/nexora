@@ -10,6 +10,7 @@ import asyncio
 
 # Set up logging
 logger = logging.getLogger(__name__)
+log = logger  # Alias for compatibility
 
 
 class AFKView(discord.ui.View):
@@ -40,7 +41,7 @@ class AFK(commands.Cog):
         os.makedirs("data", exist_ok=True)
         self.load_afk_data()
         
-        log.info("%s loaded with %d AFK users", self.__class__.__name__, len(self.afk_users))
+        logger.info("%s loaded with %d AFK users", self.__class__.__name__, len(self.afk_users))
 
     def load_afk_data(self):
         """Load AFK data from JSON file"""
@@ -58,9 +59,9 @@ class AFK(commands.Cog):
                             "global": afk_data.get("global", False),
                             "dm_notifications": afk_data.get("dm_notifications", True)
                         }
-                log.info("Loaded %d AFK users from file", len(self.afk_users))
+                logger.info("Loaded %d AFK users from file", len(self.afk_users))
         except Exception as e:
-            log.error("Error loading AFK data: %s", str(e))
+            logger.error("Error loading AFK data: %s", str(e))
 
     def save_afk_data(self):
         """Save AFK data to JSON file"""
@@ -78,9 +79,9 @@ class AFK(commands.Cog):
                 }
             with open(self.afk_file, 'w') as f:
                 json.dump(data, f, indent=4)
-            log.debug("Saved %d AFK users to file", len(self.afk_users))
+            logger.debug("Saved %d AFK users to file", len(self.afk_users))
         except Exception as e:
-            log.error("Error saving AFK data: %s", str(e))
+            logger.error("Error saving AFK data: %s", str(e))
 
     def format_duration(self, delta: datetime.timedelta) -> str:
         """Format timedelta into readable string"""
@@ -126,12 +127,12 @@ class AFK(commands.Cog):
                     else:
                         await member.edit(nick=None)
             except discord.Forbidden:
-                log.warning("Missing permissions to change nickname for user %s in guild %s", 
+                logger.warning("Missing permissions to change nickname for user %s in guild %s", 
                            member.id, guild.id)
             except discord.HTTPException as e:
-                log.error("HTTP error restoring nickname: %s", str(e))
+                logger.error("HTTP error restoring nickname: %s", str(e))
             except Exception as e:
-                log.error("Error restoring nickname: %s", str(e))
+                logger.error("Error restoring nickname: %s", str(e))
             
             # Send DM with mention summary if enabled and not silent
             if not silent and afk_data.get("dm_notifications", True) and afk_data.get("mentions"):
@@ -148,9 +149,9 @@ class AFK(commands.Cog):
                     embed.set_footer(text=f"From {guild.name}")
                     await member.send(embed=embed)
                 except discord.Forbidden:
-                    log.warning("Cannot send DM to user %s", member.id)
+                    logger.warning("Cannot send DM to user %s", member.id)
                 except Exception as e:
-                    log.error("Error sending DM: %s", str(e))
+                    logger.error("Error sending DM: %s", str(e))
             
             return afk_data
             
@@ -196,10 +197,10 @@ class AFK(commands.Cog):
                     new_nick = f"[AFK] {original_name}"[:32]
                     await member.edit(nick=new_nick)
             except discord.Forbidden:
-                log.warning("Missing permissions to change nickname for user %s in guild %s", member.id, ctx.guild.id)
+                await ctx.send("Missing permissions to change nickname for user %s in", member.id)
             except Exception as e:
-                log.error("Error changing nickname: %s", str(e))
-            
+                logger.error("Error changing nickname: %s", str(e))
+
             scope = "globally" if global_afk else f"in {ctx.guild.name}"
             embed = discord.Embed(
                 title="💤 AFK Status Set",
@@ -211,10 +212,10 @@ class AFK(commands.Cog):
             
             view = AFKView()
             await ctx.send(embed=embed, view=view)
-            log.info("User %s set AFK %s with reason: %s", member.id, scope, reason)
+            logger.info("User %s set AFK %s with reason: %s", member.id, scope, reason)
             
         except Exception as e:
-            log.error("Error in afk command: %s", str(e))
+            logger.error("Error in afk command: %s", str(e))
             embed = discord.Embed(
                 description="❌ An error occurred while setting your AFK status.",
                 color=discord.Color.red()
@@ -245,8 +246,7 @@ class AFK(commands.Cog):
                 color=discord.Color.green()
             )
             await ctx.send(embed=embed)
-            log.info("Manually removed AFK status for user %s in guild %s", ctx.author.id, ctx.guild.id)
-
+            
     @commands.hybrid_command(name="afkstatus", description="Check your or another user's AFK status")
     @app_commands.describe(user="The user to check (optional)")
     async def afkstatus(self, ctx: commands.Context, user: Optional[discord.Member] = None):
@@ -377,8 +377,6 @@ class AFK(commands.Cog):
                         except:
                             pass
                         
-                        log.info("Removed AFK status for user %s in guild %s", message.author.id, message.guild.id)
-
             # Notify if mentioned user is AFK
             if message.mentions:
                 for mentioned_user in message.mentions:
@@ -448,9 +446,9 @@ class AFK(commands.Cog):
     async def cog_unload(self):
         """Clean up when cog is unloaded"""
         self.save_afk_data()
-        log.info("%s unloaded", self.__class__.__name__)
+        logger.info("%s unloaded", self.__class__.__name__)
 
 
 async def setup(bot):
     await bot.add_cog(AFK(bot))
-    log.info("Loaded %s", AFK.__name__)
+    logger.info("Loaded %s", AFK.__name__)
