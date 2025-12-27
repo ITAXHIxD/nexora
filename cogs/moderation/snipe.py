@@ -6,7 +6,7 @@ import typing
 import logging
 from collections import deque
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class SnipeView(discord.ui.View):

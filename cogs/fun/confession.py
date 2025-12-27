@@ -6,7 +6,7 @@ import os
 import datetime
 import logging
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class Confession(commands.Cog):

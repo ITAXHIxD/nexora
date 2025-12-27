@@ -10,7 +10,7 @@ from io import BytesIO
 from PIL import Image
 from typing import Optional, List
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # ================= REGEX =================
 

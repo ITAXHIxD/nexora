@@ -9,7 +9,7 @@ import os
 import asyncio
 
 # Set up logging
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class AFKView(discord.ui.View):

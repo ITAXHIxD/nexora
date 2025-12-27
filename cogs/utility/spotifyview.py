@@ -5,7 +5,7 @@ import datetime
 from typing import Optional
 import logging
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # Cute but clean Spotify logo (make sure the link is correct!)
 SPOTIFY_LOGO = "https://i.imgur.com/1b57Ych.png"

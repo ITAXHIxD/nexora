@@ -6,7 +6,8 @@ from discord import app_commands
 from typing import Optional
 
 from .actions import send_owo_action_embed
-
+import logging
+logger = logging.getLogger(__name__)
 
 class Kill(commands.Cog):
     def __init__(self, bot):

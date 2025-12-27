@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 import logging
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 class Kick(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
