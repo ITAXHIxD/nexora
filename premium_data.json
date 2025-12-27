@@ -1,0 +1,30 @@
+{
+  "subscriptions": {
+    "1087039578931724468": {
+      "tier": "CUSTOM",
+      "expires_at": null,
+      "purchased_by": "1013851779886231685",
+      "purchased_at": "2025-08-27T04:22:33.850549",
+      "payment_method": "Manual",
+      "amount_paid": 0,
+      "notes": "Set by 𝙸𝚝𝚊𝚡𝚑𝚒_𝚡𝙳 via /set_premium_tier"
+    }
+  },
+  "_example": {
+    "server_id_here": {
+      "tier": "PRO",
+      "expires_at": "2025-12-31T23:59:59",
+      "purchased_by": "user_id",
+      "purchased_at": "2025-08-14T20:53:00",
+      "payment_method": "PayPal",
+      "amount_paid": 12.99,
+      "notes": "Annual subscription with discount"
+    }
+  },
+  "_instructions": [
+    "Add server subscriptions to the 'subscriptions' object",
+    "Use server ID as the key",
+    "Set expires_at to null for permanent premium",
+    "Valid tiers: FREE, BASIC, PRO, ENTERPRISE"
+  ]
+}

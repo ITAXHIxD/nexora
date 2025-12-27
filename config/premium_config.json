@@ -1,0 +1,134 @@
+{
+  "premium_tiers": {
+    "FREE": {
+      "name": "Free Tier",
+      "display_name": "🆓 Free",
+      "emoji": "🆓",
+      "price": 0,
+      "duration_days": -1,
+      "color": "0x99AAB5",
+      "features": {
+        "vanity_roles": 0,
+        "message_history": 10,
+        "custom_responses": false,
+        "priority_support": false,
+        "analytics": false,
+        "auto_moderation": false,
+        "scheduled_messages": false
+      },
+      "limits": {
+        "api_calls_per_day": 100,
+        "response_time_priority": 3
+      }
+    },
+    "BASIC": {
+      "name": "Basic Premium",
+      "display_name": "💎 Basic",
+      "emoji": "💎",
+      "price": 4.99,
+      "duration_days": 30,
+      "color": "0x5DADE2",
+      "features": {
+        "vanity_roles": 5,
+        "message_history": 25,
+        "custom_responses": true,
+        "priority_support": true,
+        "analytics": true,
+        "auto_moderation": false,
+        "scheduled_messages": false
+      },
+      "limits": {
+        "api_calls_per_day": 500,
+        "response_time_priority": 2
+      }
+    },
+    "PRO": {
+      "name": "Pro Premium",
+      "display_name": "🚀 Pro",
+      "emoji": "🚀",
+      "price": 12.99,
+      "duration_days": 30,
+      "color": "0x57F287",
+      "features": {
+        "vanity_roles": 20,
+        "message_history": 50,
+        "custom_responses": true,
+        "priority_support": true,
+        "analytics": true,
+        "auto_moderation": true,
+        "scheduled_messages": true
+      },
+      "limits": {
+        "api_calls_per_day": 1500,
+        "response_time_priority": 1
+      }
+    },
+    "ENTERPRISE": {
+      "name": "Enterprise",
+      "display_name": "🏢 Enterprise",
+      "emoji": "🏢",
+      "price": 29.99,
+      "duration_days": 30,
+      "color": "0xFFD700",
+      "features": {
+        "vanity_roles": -1,
+        "message_history": 100,
+        "custom_responses": true,
+        "priority_support": true,
+        "analytics": true,
+        "auto_moderation": true,
+        "scheduled_messages": true
+      },
+      "limits": {
+        "api_calls_per_day": -1,
+        "response_time_priority": 0
+      }
+    },
+    "custom": {
+      "name": "Custom",
+      "display_name": "🛃 Custom",
+      "emoji": "🛃",
+      "price": "decided_by_user",
+      "duration_days": "decided_by_user",
+      "color": "decided_by_user",
+      "features": {
+        "vanity_roles": -1,
+        "message_history": 100,
+        "custom_responses": true,
+        "priority_support": true,
+        "analytics": true,
+        "auto_moderation": true,
+        "scheduled_messages": true,
+        "voice_support": true,
+        "image_generation": true,
+        "music_integration": true,
+        "web_dashboard": true,
+        "early_access": true
+      },
+      "limits": {
+        "api_calls_per_day": -1,
+        "response_time_priority": 0,
+        "max_servers": 1,
+        "max_users": -1,
+        "max_roles": -1,
+        "max_embeds": -1
+      }
+    }
+  },
+  "payment_info": {
+    "owner_id": "1013851779886231685",
+    "contact_method": "Discord DM",
+    "payment_methods": [
+      "upi"
+    ],
+    "instructions": "Contact <@1013851779886231685> with your server ID and desired tier for premium upgrade."
+  },
+  "discounts": {
+    "yearly_discount": 20,
+    "bulk_discount": {
+      "5_servers": 15,
+      "10_servers": 20,
+      "25_servers": 30
+    }
+  }
+}

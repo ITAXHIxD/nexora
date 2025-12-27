@@ -1,0 +1,18 @@
+{
+  "bot_settings": {
+    "default_prefix": "n!",
+    "status_rotation": true,
+    "auto_sync_commands": true,
+    "response_timeout": 30,
+    "max_response_length": 2000,
+    "enable_dm_responses": false
+  },
+  "ui_settings": {
+    "embed_color": "0x5865F2",
+    "error_color": "0xED4245",
+    "success_color": "0x57F287",
+    "warning_color": "0xFEE75C",
+    "use_thumbnails": true,
+    "show_command_usage": true
+  }
+}

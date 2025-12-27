@@ -1,0 +1,1052 @@
+import discord
+from discord.ext import commands, tasks
+from discord import app_commands
+from discord.ui import View, Select, Button
+import asyncio
+import logging
+import json
+import os
+import re
+
+logger = logging.getLogger(__name__)
+
+# ===== VANITY SETTINGS STORAGE =====
+class VanitySettings:
+    def __init__(self, vanity_cog):
+        self.vanity_cog = vanity_cog
+        self.settings = {}
+    
+    def get_guild_settings(self, guild_id: str) -> dict:
+        return self.settings.get(guild_id, {
+            "match_mode": "substring",
+            "priority_mode": "longest_first", 
+            "case_sensitive": False,
+            "enabled_triggers": []
+        })
+    
+    def save_guild_setting(self, guild_id: str, key: str, value):
+        if guild_id not in self.settings:
+            self.settings[guild_id] = self.get_guild_settings(guild_id)
+        self.settings[guild_id][key] = value
+        self._save_to_file()
+    
+    def _save_to_file(self):
+        try:
+            file_path = self.vanity_cog.get_data_path("vanity_settings.json")
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(self.settings, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Error saving vanity settings: {e}")
+    
+    def load_from_file(self):
+        try:
+            file_path = self.vanity_cog.get_data_path("vanity_settings.json")
+            if os.path.exists(file_path):
+                with open(file_path, "r", encoding="utf-8") as f:
+                    self.settings = json.load(f)
+        except Exception as e:
+            logger.error(f"Error loading vanity settings: {e}")
+
+# ===== UI COMPONENTS =====
+class MatchModeSelect(Select):
+    def __init__(self, guild_id: str, current_mode: str, vanity_settings):
+        self.guild_id = guild_id
+        self.vanity_settings = vanity_settings
+        options = [
+            discord.SelectOption(
+                label="Substring Matching", 
+                description="Trigger if phrase is found anywhere in status",
+                value="substring",
+                emoji="🔍",
+                default=(current_mode == "substring")
+            ),
+            discord.SelectOption(
+                label="Exact Match Only", 
+                description="Trigger only if status exactly matches",
+                value="exact",
+                emoji="🎯",
+                default=(current_mode == "exact")
+            ),
+            discord.SelectOption(
+                label="Word Boundary Match", 
+                description="Trigger if phrase matches as complete words",
+                value="word_boundary",
+                emoji="📝",
+                default=(current_mode == "word_boundary")
+            )
+        ]
+        super().__init__(
+            placeholder="Choose how triggers should match status",
+            min_values=1, max_values=1, options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        selected_mode = self.values[0]
+        self.vanity_settings.save_guild_setting(self.guild_id, "match_mode", selected_mode)
+        
+        mode_names = {
+            "substring": "Substring Matching",
+            "exact": "Exact Match Only", 
+            "word_boundary": "Word Boundary Match"
+        }
+        
+        await interaction.response.send_message(
+            f"✅ **Match Mode Updated**\nNow using: **{mode_names[selected_mode]}**", 
+            ephemeral=True
+        )
+
+class PriorityModeSelect(Select):
+    def __init__(self, guild_id: str, current_priority: str, vanity_settings):
+        self.guild_id = guild_id
+        self.vanity_settings = vanity_settings
+        options = [
+            discord.SelectOption(
+                label="Longest First", 
+                description="Prioritize longer triggers (e.g., 'onepiece paglu' over 'onepiece')",
+                value="longest_first",
+                emoji="📏",
+                default=(current_priority == "longest_first")
+            ),
+            discord.SelectOption(
+                label="First Match", 
+                description="Use the first matching trigger found",
+                value="first_match",
+                emoji="⚡",
+                default=(current_priority == "first_match")
+            ),
+            discord.SelectOption(
+                label="All Matches", 
+                description="Assign all matching trigger roles",
+                value="all_matches",
+                emoji="🎭",
+                default=(current_priority == "all_matches")
+            )
+        ]
+        super().__init__(
+            placeholder="Choose trigger priority when multiple match",
+            min_values=1, max_values=1, options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        selected_priority = self.values[0]
+        self.vanity_settings.save_guild_setting(self.guild_id, "priority_mode", selected_priority)
+        
+        priority_names = {
+            "longest_first": "Longest First Priority",
+            "first_match": "First Match Only",
+            "all_matches": "All Matching Triggers"
+        }
+        
+        await interaction.response.send_message(
+            f"✅ **Priority Mode Updated**\nNow using: **{priority_names[selected_priority]}**", 
+            ephemeral=True
+        )
+
+class TriggerToggleSelect(Select):
+    def __init__(self, guild_id: str, available_triggers: list, enabled_triggers: list, vanity_settings):
+        self.guild_id = guild_id
+        self.vanity_settings = vanity_settings
+        options = []
+        
+        for trigger, role_id in available_triggers:
+            is_enabled = trigger in enabled_triggers
+            options.append(discord.SelectOption(
+                label=trigger,
+                description=f"Toggle this trigger on/off",
+                value=trigger,
+                emoji="✅" if is_enabled else "❌",
+                default=is_enabled
+            ))
+        
+        super().__init__(
+            placeholder="Toggle which triggers are active",
+            min_values=0, max_values=len(options), options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        enabled_triggers = self.values
+        self.vanity_settings.save_guild_setting(self.guild_id, "enabled_triggers", enabled_triggers)
+        
+        if enabled_triggers:
+            trigger_list = "• " + "\n• ".join(enabled_triggers)
+            await interaction.response.send_message(
+                f"✅ **Active Triggers Updated**\n{trigger_list}", 
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                "⚠️ **All triggers disabled**\nVanity roles won't assign until you enable some triggers.", 
+                ephemeral=True
+            )
+
+class CaseSensitiveToggle(Button):
+    def __init__(self, guild_id: str, is_case_sensitive: bool, vanity_settings):
+        self.guild_id = guild_id
+        self.is_case_sensitive = is_case_sensitive
+        self.vanity_settings = vanity_settings
+        
+        super().__init__(
+            label=f"Case Sensitive: {'ON' if is_case_sensitive else 'OFF'}", 
+            emoji="🔤" if is_case_sensitive else "🔡",
+            style=discord.ButtonStyle.success if is_case_sensitive else discord.ButtonStyle.secondary
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        self.is_case_sensitive = not self.is_case_sensitive
+        self.vanity_settings.save_guild_setting(self.guild_id, "case_sensitive", self.is_case_sensitive)
+        
+        # Update button appearance
+        self.label = f"Case Sensitive: {'ON' if self.is_case_sensitive else 'OFF'}"
+        self.emoji = "🔤" if self.is_case_sensitive else "🔡"
+        self.style = discord.ButtonStyle.success if self.is_case_sensitive else discord.ButtonStyle.secondary
+        
+        await interaction.response.edit_message(view=self.view)
+
+class VanitySettingsView(View):
+    def __init__(self, guild_id: str, available_triggers: list, vanity_settings):
+        super().__init__(timeout=300)  # 5 minute timeout
+        
+        settings = vanity_settings.get_guild_settings(guild_id)
+        
+        # Add all UI components
+        self.add_item(MatchModeSelect(guild_id, settings["match_mode"], vanity_settings))
+        self.add_item(PriorityModeSelect(guild_id, settings["priority_mode"], vanity_settings))
+        
+        if available_triggers:  # Only show if there are triggers
+            self.add_item(TriggerToggleSelect(guild_id, available_triggers, settings["enabled_triggers"], vanity_settings))
+        
+        self.add_item(CaseSensitiveToggle(guild_id, settings["case_sensitive"], vanity_settings))
+
+    async def on_timeout(self):
+        # Disable all components when view times out
+        for item in self.children:
+            item.disabled = True
+
+class Vanity(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        # Initialize vanity settings
+        self.vanity_settings = VanitySettings(self)
+        self.vanity_settings.load_from_file()
+        
+        # Always start the task - no DB requirement
+        if not self.check_vanity_roles_task.is_running():
+            self.check_vanity_roles_task.start()
+
+    def cog_unload(self):
+        if hasattr(self, 'check_vanity_roles_task') and self.check_vanity_roles_task.is_running():
+            self.check_vanity_roles_task.cancel()
+
+    def get_data_path(self, filename: str) -> str:
+        """Get path to data file"""
+        try:
+            # Try to get project root (2 levels up from cog)
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(os.path.dirname(current_dir))
+            data_dir = os.path.join(project_root, "data")
+        except:
+            # Fallback to current directory
+            data_dir = "data"
+        
+        # Ensure data directory exists
+        os.makedirs(data_dir, exist_ok=True)
+        return os.path.join(data_dir, filename)
+
+    def get_owner_id(self):
+        """Safely get the owner ID from various sources"""
+        if hasattr(self.bot, 'owner_id') and self.bot.owner_id:
+            try:
+                return int(self.bot.owner_id)
+            except (ValueError, TypeError):
+                pass
+        
+        try:
+            from utils.config import OWNER_ID
+            return int(OWNER_ID)
+        except (ImportError, ValueError, TypeError):
+            pass
+        
+        return 0
+
+    def _load_vanity_data(self) -> dict:
+        """Load vanity roles data from JSON file with better error handling"""
+        try:
+            file_path = self.get_data_path("vanity_roles.json")
+            
+            if os.path.exists(file_path):
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                
+                # FIXED: Ensure proper structure exists
+                if not isinstance(data, dict):
+                    raise ValueError("Invalid data format")
+                
+                if "guilds" not in data:
+                    data["guilds"] = {}
+                
+                return data
+            else:
+                # Create default structure
+                default_data = {
+                    "_info": "Vanity roles storage", 
+                    "guilds": {}
+                }
+                self._save_vanity_data(default_data)
+                return default_data
+                
+        except Exception as e:
+            logger.error(f"Error loading vanity data: {e}")
+            # Return safe default structure
+            return {
+                "_info": "Vanity roles storage",
+                "guilds": {}
+            }
+
+    def _save_vanity_data(self, data: dict):
+        """Save vanity roles data to JSON file"""
+        try:
+            file_path = self.get_data_path("vanity_roles.json")
+            
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            logger.info("Vanity data saved successfully")
+        except Exception as e:
+            logger.error(f"Error saving vanity data: {e}")
+
+    def _save_vanity_role(self, guild_id: str, vanity_text: str, role_id: str, creator_id: str):
+        """Save a vanity role mapping with proper error handling"""
+        try:
+            data = self._load_vanity_data()
+
+            # FIXED: Ensure 'guilds' key always exists
+            if "guilds" not in data:
+                data["guilds"] = {}
+
+            # Initialize guild data if needed
+            if guild_id not in data["guilds"]:
+                data["guilds"][guild_id] = {}
+
+            # Add the vanity role mapping
+            data["guilds"][guild_id][vanity_text.lower()] = {
+                "role_id": role_id,
+                "creator_id": creator_id,
+                "created_at": discord.utils.utcnow().isoformat(),
+                "usage_count": 0
+            }
+
+            self._save_vanity_data(data)
+            logger.info(f"Saved vanity role: {vanity_text} -> {role_id} for guild {guild_id}")
+        except Exception as e:
+            logger.error(f"Error saving vanity role: {e}")
+            # Create fresh data structure on error
+            try:
+                fresh_data = {
+                    "_info": "Vanity roles storage",
+                    "guilds": {
+                        guild_id: {
+                            vanity_text.lower(): {
+                                "role_id": role_id,
+                                "creator_id": creator_id,
+                                "created_at": discord.utils.utcnow().isoformat(),
+                                "usage_count": 0
+                            }
+                        }
+                    }
+                }
+                self._save_vanity_data(fresh_data)
+                logger.info("Created fresh vanity data structure")
+            except Exception as e2:
+                logger.error(f"Failed to create fresh data: {e2}")
+
+    def _delete_vanity_role(self, guild_id: str, vanity_text: str):
+        """Delete a vanity role mapping"""
+        try:
+            data = self._load_vanity_data()
+            
+            if guild_id in data["guilds"] and vanity_text.lower() in data["guilds"][guild_id]:
+                del data["guilds"][guild_id][vanity_text.lower()]
+                
+                # Clean up empty guild entries
+                if not data["guilds"][guild_id]:
+                    del data["guilds"][guild_id]
+                
+                self._save_vanity_data(data)
+                logger.info(f"Deleted vanity role: {vanity_text} for guild {guild_id}")
+        except Exception as e:
+            logger.error(f"Error deleting vanity role: {e}")
+
+    def _get_vanity_roles(self, guild_id: str) -> dict:
+        """Get all vanity role mappings for a guild"""
+        try:
+            data = self._load_vanity_data()
+            
+            if guild_id in data.get("guilds", {}):
+                # Return simplified format: {text: role_id}
+                guild_data = data["guilds"][guild_id]
+                return {text: info["role_id"] for text, info in guild_data.items()}
+            
+            return {}
+        except Exception as e:
+            logger.error(f"Error getting vanity roles: {e}")
+            return {}
+
+    def apply_vanity_settings(self, guild_id: str, combined_status: str, role_objects: dict) -> set:
+        """Apply vanity settings to determine which roles should be assigned"""
+        settings = self.vanity_settings.get_guild_settings(guild_id)
+        
+        # Filter to only enabled triggers (if any are specified)
+        if settings["enabled_triggers"]:
+            enabled_role_objects = {
+                trigger: role for trigger, role in role_objects.items() 
+                if trigger in settings["enabled_triggers"]
+            }
+        else:
+            # If no specific triggers enabled, use all
+            enabled_role_objects = role_objects
+        
+        if not enabled_role_objects:
+            return set()
+        
+        status = combined_status if settings["case_sensitive"] else combined_status.lower()
+        should_have_roles = set()
+        
+        # Apply matching mode
+        if settings["match_mode"] == "exact":
+            # Exact match only
+            for trigger, role in enabled_role_objects.items():
+                trigger_check = trigger if settings["case_sensitive"] else trigger.lower()
+                if status.strip() == trigger_check:
+                    should_have_roles.add(role)
+                    if settings["priority_mode"] == "first_match":
+                        break
+                        
+        elif settings["match_mode"] == "word_boundary":
+            # Word boundary matching
+            for trigger, role in enabled_role_objects.items():
+                trigger_check = trigger if settings["case_sensitive"] else trigger.lower()
+                pattern = r'\b' + re.escape(trigger_check) + r'\b'
+                if re.search(pattern, status):
+                    should_have_roles.add(role)
+                    if settings["priority_mode"] == "first_match":
+                        break
+                        
+        else:  # substring (default)
+            # Substring matching with priority
+            triggers_to_check = list(enabled_role_objects.items())
+            
+            if settings["priority_mode"] == "longest_first":
+                # Sort by length descending
+                triggers_to_check = sorted(triggers_to_check, key=lambda x: len(x[0]), reverse=True)
+            
+            for trigger, role in triggers_to_check:
+                trigger_check = trigger if settings["case_sensitive"] else trigger.lower() 
+                if trigger_check in status:
+                    should_have_roles.add(role)
+                    if settings["priority_mode"] == "first_match":
+                        break
+        
+        return should_have_roles
+
+    @app_commands.command(name="vanity", description="Manage vanity roles (add/remove/list/settings)")
+    @app_commands.describe(
+        action="add/remove/list/settings",
+        vanity_text="Trigger text to detect in status/bio (for add/remove)",
+        role="Role to assign when trigger is found (for add)"
+    )
+    @app_commands.choices(action=[
+        app_commands.Choice(name="Add", value="add"),
+        app_commands.Choice(name="Remove", value="remove"),
+        app_commands.Choice(name="List", value="list"),
+        app_commands.Choice(name="Settings", value="settings")
+    ])
+    @app_commands.default_permissions(manage_roles=True)
+    async def vanity(
+        self,
+        interaction: discord.Interaction,
+        action: app_commands.Choice[str],
+        vanity_text: str = None,
+        role: discord.Role = None
+    ):
+        # Enhanced premium check
+        if not self.bot.is_premium_guild(interaction.guild_id):
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    title="🔒 Premium Feature Required",
+                    description="Vanity roles require premium access!\nUse `/premium_status` to check your tier.",
+                    color=0xff6b6b
+                ).add_field(
+                    name="💡 How to Upgrade",
+                    value=f"Contact <@{self.get_owner_id()}> for premium access!",
+                    inline=False
+                ),
+                ephemeral=True
+            )
+            return
+
+        guild_id = str(interaction.guild_id)
+
+        if action.value == "add":
+            if not vanity_text or not role:
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        title="❌ Missing Parameters",
+                        description="Provide vanity_text and role.",
+                        color=0xff0000
+                    ),
+                    ephemeral=True
+                )
+                return
+
+            # Check bot permissions
+            if not interaction.guild.me.guild_permissions.manage_roles:
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        title="❌ Missing Permissions",
+                        description="I need **Manage Roles** permission to assign vanity roles.",
+                        color=0xff0000
+                    ),
+                    ephemeral=True
+                )
+                return
+
+            # Check role hierarchy
+            if role >= interaction.guild.me.top_role:
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        title="❌ Role Hierarchy Error",
+                        description=f"I cannot assign {role.mention} because it's higher than or equal to my highest role.",
+                        color=0xff0000
+                    ),
+                    ephemeral=True
+                )
+                return
+
+            # Check vanity limits
+            current_mappings = len(self._get_vanity_roles(guild_id))
+            tier = self.bot.get_guild_tier(interaction.guild_id)
+            
+            # Get limit from bot's vanity limits
+            max_vanity = self.bot.get_vanity_limit_for_guild(interaction.guild_id)
+            
+            if max_vanity != float('inf') and current_mappings >= max_vanity:
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        title="🔒 Vanity Role Limit Reached",
+                        description=f"**{tier.title()}** tier allows **{max_vanity}** vanity roles.\n"
+                                   f"You currently have **{current_mappings}/{max_vanity}** vanity roles.",
+                        color=0xff6b6b
+                    ).add_field(
+                        name="💡 Want More?",
+                        value=f"Contact <@{self.get_owner_id()}> to upgrade your tier!",
+                        inline=False
+                    ),
+                    ephemeral=True
+                )
+                return
+
+            # Save mapping
+            self._save_vanity_role(guild_id, vanity_text, str(role.id), str(interaction.user.id))
+            
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    title="✅ Vanity Role Added",
+                    description=f"Trigger: `{vanity_text}` → Role: {role.mention}\n\n"
+                               f"**How it works:**\n"
+                               f"• Users with `{vanity_text}` in their custom status will get this role\n"
+                               f"• Roles are checked every 5 minutes\n"
+                               f"• Role will be removed if they change their status\n"
+                               f"• Use `/vanity_configure` to customize matching behavior",
+                    color=0x00ff00
+                )
+            )
+
+        elif action.value == "remove":
+            if not vanity_text:
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        title="❌ Missing Parameters",
+                        description="Provide vanity_text to remove.",
+                        color=0xff0000
+                    ),
+                    ephemeral=True
+                )
+                return
+            
+            self._delete_vanity_role(guild_id, vanity_text)
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    title="✅ Vanity Role Removed",
+                    description=f"Removed mapping for `{vanity_text}`",
+                    color=0x00ff00
+                )
+            )
+
+        elif action.value == "list":
+            mapping = self._get_vanity_roles(guild_id)
+            if not mapping:
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        title="ℹ️ No Vanity Roles",
+                        description="No vanity role mappings configured.\nUse `/vanity add` to create one!",
+                        color=0x5DADE2
+                    ),
+                    ephemeral=True
+                )
+                return
+
+            embed = discord.Embed(
+                title="🆔 Vanity Roles",
+                description="Current mappings:",
+                color=0x5DADE2
+            )
+            
+            # Show usage info
+            tier = self.bot.get_guild_tier(interaction.guild_id)
+            limits = {'free': 0, 'basic': 3, 'pro': 10, 'ultra': 25, 'custom': float('inf')}
+            max_vanity = limits.get(tier, 0)
+            limit_text = "Unlimited" if max_vanity == float('inf') else str(max_vanity)
+            
+            embed.add_field(
+                name="📊 Usage",
+                value=f"**{len(mapping)}/{limit_text}** vanity roles ({tier.title()} tier)",
+                inline=False
+            )
+
+            for text, role_id in mapping.items():
+                role_obj = interaction.guild.get_role(int(role_id))
+                role_name = role_obj.mention if role_obj else f"<@&{role_id}> (missing)"
+                embed.add_field(name=f"`{text}`", value=f"→ {role_name}", inline=False)
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        else:  # settings
+            mapping = self._get_vanity_roles(guild_id)
+            tier = self.bot.get_guild_tier(interaction.guild_id)
+            settings = self.vanity_settings.get_guild_settings(guild_id)
+            
+            embed = discord.Embed(
+                title="⚙️ Vanity Settings",
+                description=f"Active mappings: **{len(mapping)}**",
+                color=0x5DADE2
+            )
+            
+            embed.add_field(
+                name="🎯 Current Tier",
+                value=f"**{tier.title()}**",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="🔄 Check Interval", 
+                value="**5 minutes**",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="💾 Storage",
+                value="**JSON File**",
+                inline=True
+            )
+            
+            # Show current settings
+            mode_names = {
+                "substring": "🔍 Substring",
+                "exact": "🎯 Exact Match", 
+                "word_boundary": "📝 Word Boundary"
+            }
+            
+            priority_names = {
+                "longest_first": "📏 Longest First",
+                "first_match": "⚡ First Match",
+                "all_matches": "🎭 All Matches"
+            }
+            
+            embed.add_field(
+                name="🎯 Match Mode",
+                value=mode_names.get(settings["match_mode"], "Unknown"),
+                inline=True
+            )
+            
+            embed.add_field(
+                name="📋 Priority Mode",
+                value=priority_names.get(settings["priority_mode"], "Unknown"),
+                inline=True
+            )
+            
+            embed.add_field(
+                name="🔤 Case Sensitive",
+                value="✅ Enabled" if settings["case_sensitive"] else "❌ Disabled",
+                inline=True
+            )
+
+            # Show next check time
+            if self.check_vanity_roles_task.is_running():
+                next_run = self.check_vanity_roles_task.next_iteration
+                if next_run:
+                    embed.add_field(
+                        name="⏰ Next Check",
+                        value=f"<t:{int(next_run.timestamp())}:R>",
+                        inline=False
+                    )
+            
+            embed.add_field(
+                name="⚙️ Advanced Configuration",
+                value="Use `/vanity_configure` to customize matching behavior with a visual interface!",
+                inline=False
+            )
+
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="vanity_configure", description="Configure vanity role matching settings")
+    async def vanity_configure(self, interaction: discord.Interaction):
+        """Configure vanity role detection settings"""
+        if not self.bot.is_premium_guild(interaction.guild_id):
+            await interaction.response.send_message("🔒 This feature requires premium access!", ephemeral=True)
+            return
+        
+        guild_id = str(interaction.guild_id)
+        
+        # Get available triggers
+        mapping = self._get_vanity_roles(guild_id)
+        available_triggers = [(text, role_id) for text, role_id in mapping.items()]
+        
+        if not available_triggers:
+            await interaction.response.send_message(
+                "❌ **No vanity roles configured**\nUse `/vanity add` to create some triggers first!", 
+                ephemeral=True
+            )
+            return
+        
+        # Get current settings
+        settings = self.vanity_settings.get_guild_settings(guild_id)
+        
+        # Create settings overview embed
+        embed = discord.Embed(
+            title="⚙️ Vanity Role Configuration", 
+            description="Configure how vanity roles detect and assign based on status",
+            color=0x5DADE2
+        )
+        
+        mode_descriptions = {
+            "substring": "🔍 Substring - triggers anywhere in status",
+            "exact": "🎯 Exact Match - status must exactly match trigger", 
+            "word_boundary": "📝 Word Boundary - triggers as complete words"
+        }
+        
+        priority_descriptions = {
+            "longest_first": "📏 Longest First - prioritize longer triggers",
+            "first_match": "⚡ First Match - use first trigger found",
+            "all_matches": "🎭 All Matches - assign all matching roles"
+        }
+        
+        embed.add_field(
+            name="🎯 Current Match Mode", 
+            value=mode_descriptions.get(settings["match_mode"], "Unknown"),
+            inline=False
+        )
+        
+        embed.add_field(
+            name="📋 Current Priority Mode", 
+            value=priority_descriptions.get(settings["priority_mode"], "Unknown"),
+            inline=False
+        )
+        
+        embed.add_field(
+            name="🔤 Case Sensitive", 
+            value="✅ Enabled" if settings["case_sensitive"] else "❌ Disabled",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="📊 Active Triggers", 
+            value=f"{len(settings['enabled_triggers']) if settings['enabled_triggers'] else len(available_triggers)}/{len(available_triggers)}",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="ℹ️ How to Use", 
+            value="Use the dropdowns and buttons below to configure your settings.\nSettings apply immediately to all vanity role checks.",
+            inline=False
+        )
+        
+        view = VanitySettingsView(guild_id, available_triggers, self.vanity_settings)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    # JSON-based vanity role checking with settings integration
+    @tasks.loop(minutes=5)
+    async def check_vanity_roles_task(self):
+        try:
+            processed_guilds = 0
+            role_changes = 0
+
+            for guild in self.bot.guilds:
+                # Skip non-premium guilds efficiently  
+                if not self.bot.is_premium_guild(guild.id):
+                    continue
+
+                mapping = self._get_vanity_roles(str(guild.id))
+                if not mapping:
+                    continue
+
+                # Build role objects map
+                role_objects = {}
+                vanity_role_ids = set()
+
+                for text, role_id in mapping.items():
+                    role = guild.get_role(int(role_id))
+                    if role:
+                        role_objects[text.lower()] = role
+                        vanity_role_ids.add(role.id)
+
+                if not role_objects:
+                    continue
+
+                # Process members in smaller batches
+                batch_size = 50  # Process 50 members at a time
+                members = [m for m in guild.members if not m.bot]
+                
+                for i in range(0, len(members), batch_size):
+                    member_batch = members[i:i + batch_size]
+                    tasks = []
+
+                    for member in member_batch:
+                        # Enhanced custom status detection
+                        status_texts = []
+                        
+                        # Check all activities for custom status
+                        # FIXED - proper attribute access
+                        for activity in member.activities:
+                            if isinstance(activity, discord.CustomActivity):
+                                # CustomActivity uses 'name' or 'state', not 'text'
+                                text = getattr(activity, 'name', None) or getattr(activity, 'state', '')
+                                if text:
+                                    status_texts.append(text.lower())
+                            elif hasattr(activity, 'name') and activity.name:
+                                # Other activities use 'name'
+                                status_texts.append(activity.name.lower())
+
+                        combined_status = ' '.join(status_texts)
+                        current_vanity_roles = {role for role in member.roles if role.id in vanity_role_ids}
+
+                        # ENHANCED: Apply vanity settings to determine roles
+                        should_have_roles = self.apply_vanity_settings(str(guild.id), combined_status, role_objects)
+
+                        # Determine changes needed
+                        roles_to_add = should_have_roles - current_vanity_roles
+                        roles_to_remove = current_vanity_roles - should_have_roles
+
+                        # Queue role changes
+                        for role in roles_to_add:
+                            tasks.append(self._safe_add_role(member, role, f"Vanity trigger matched"))
+                            role_changes += 1
+
+                        for role in roles_to_remove:
+                            tasks.append(self._safe_remove_role(member, role, "Vanity trigger no longer matched"))
+                            role_changes += 1
+
+                    # Execute batch of role changes
+                    if tasks:
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                        await asyncio.sleep(1)  # Delay between batches
+
+                processed_guilds += 1
+                # Delay between guilds
+                await asyncio.sleep(2)
+
+            if role_changes > 0:
+                logger.info(f"Vanity check completed: {processed_guilds} guilds, {role_changes} role changes")
+
+        except Exception as e:
+            logger.error(f"Vanity role task error: {e}")
+
+    async def _safe_add_role(self, member: discord.Member, role: discord.Role, reason: str):
+        """Safely add role with comprehensive error handling and permission checks"""
+        try:
+            # Check if member already has the role
+            if role in member.roles:
+                return
+                
+            # Check bot permissions
+            if not member.guild.me.guild_permissions.manage_roles:
+                logger.error(f"Bot missing 'Manage Roles' permission in {member.guild.name}")
+                return
+                
+            # CRITICAL: Check role hierarchy
+            if role.position >= member.guild.me.top_role.position:
+                logger.error(f"Cannot assign {role.name} - role position ({role.position}) >= bot's top role ({member.guild.me.top_role.position})")
+                return
+                
+            await member.add_roles(role, reason=reason)
+            logger.info(f"✅ Added vanity role {role.name} to {member.display_name} in {member.guild.name}")
+            
+        except discord.Forbidden:
+            logger.error(f"❌ Forbidden: Cannot add role {role.name} to {member.display_name} - check permissions and role hierarchy")
+        except discord.HTTPException as e:
+            logger.error(f"❌ HTTP Error adding role {role.name} to {member.display_name}: {e}")
+        except Exception as e:
+            logger.error(f"❌ Unexpected error adding role {role.name} to {member.display_name}: {e}")
+
+    async def _safe_remove_role(self, member: discord.Member, role: discord.Role, reason: str):
+        """Safely remove role with comprehensive error handling and permission checks"""
+        try:
+            # Check if member has the role
+            if role not in member.roles:
+                return
+                
+            # Check bot permissions
+            if not member.guild.me.guild_permissions.manage_roles:
+                logger.error(f"Bot missing 'Manage Roles' permission in {member.guild.name}")
+                return
+                
+            # Check role hierarchy
+            if role.position >= member.guild.me.top_role.position:
+                logger.error(f"Cannot remove {role.name} - role position ({role.position}) >= bot's top role ({member.guild.me.top_role.position})")
+                return
+                
+            await member.remove_roles(role, reason=reason)
+            logger.info(f"✅ Removed vanity role {role.name} from {member.display_name} in {member.guild.name}")
+            
+        except discord.Forbidden:
+            logger.error(f"❌ Forbidden: Cannot remove role {role.name} from {member.display_name} - check permissions and role hierarchy")
+        except discord.HTTPException as e:
+            logger.error(f"❌ HTTP Error removing role {role.name} from {member.display_name}: {e}")
+        except Exception as e:
+            logger.error(f"❌ Unexpected error removing role {role.name} from {member.display_name}: {e}")
+
+    @check_vanity_roles_task.before_loop
+    async def _before_vanity(self):
+        await self.bot.wait_until_ready()
+        logger.info("Vanity role checking task started (JSON storage)")
+
+    @app_commands.command(name="vanity_test", description="Test vanity role detection for yourself")
+    async def vanity_test(self, interaction: discord.Interaction):
+        """Test what custom status text is being detected"""
+        member = interaction.guild.get_member(interaction.user.id)
+        
+        status_texts = []
+        for activity in member.activities:
+            if isinstance(activity, discord.CustomActivity):
+                text = getattr(activity, 'name', None) or getattr(activity, 'state', '')
+                if text:
+                    status_texts.append(text.lower())
+            elif hasattr(activity, 'name') and activity.name:
+                status_texts.append(activity.name.lower())
+
+        embed = discord.Embed(
+            title="🔍 Your Status Detection",
+            color=0x5DADE2
+        )
+
+        if status_texts:
+            embed.description = "Detected activities:\n" + "\n".join([f"`{t}`" for t in status_texts])
+        else:
+            embed.description = "No custom status or activities detected."
+
+        # Build role objects
+        mapping = self._get_vanity_roles(str(interaction.guild_id))
+        if mapping:
+            role_objects = {}
+            for text, role_id in mapping.items():
+                role = interaction.guild.get_role(int(role_id))
+                if role:
+                    role_objects[text.lower()] = role
+
+            combined = ' '.join(status_texts)  # Use combined raw status texts
+            should_have_roles = self.apply_vanity_settings(str(interaction.guild_id), combined, role_objects)
+
+            if should_have_roles:
+                matches = [f"`{text}` → {role.mention}" for text, role in role_objects.items() if role in should_have_roles]
+                embed.add_field(name="Would Trigger", value="\n".join(matches), inline=False)
+            else:
+                embed.add_field(name="No Matches", value="Your status wouldn't trigger any vanity roles with current settings.", inline=False)
+
+        # Show current settings preview
+        settings = self.vanity_settings.get_guild_settings(str(interaction.guild_id))
+        settings_text = f"Mode: {settings['match_mode']}, Priority: {settings['priority_mode']}, Case: {'On' if settings['case_sensitive'] else 'Off'}"
+        embed.add_field(name="Current Settings", value=settings_text, inline=False)
+        if self.check_vanity_roles_task.is_running():
+            next_run = self.check_vanity_roles_task.next_iteration
+            if next_run:
+                # Discord timestamp formatting for relative time display: <t:TIMESTAMP:R>
+                embed.add_field(
+                    name="⏰ Next Vanity Check",
+                    value=f"<t:{int(next_run.timestamp())}:R>",
+                    inline=False
+                )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="vanity_stats", description="View vanity role statistics (Premium)")
+    async def vanity_stats(self, interaction: discord.Interaction):
+        """Show vanity role usage statistics for premium servers"""
+        guild_id = str(interaction.guild_id)
+        mapping = self._get_vanity_roles(guild_id)
+        
+        if not mapping:
+            await interaction.response.send_message("No vanity roles configured for statistics.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title="📊 Vanity Role Statistics",
+            description=f"Statistics for **{len(mapping)}** vanity roles",
+            color=0x5DADE2
+        )
+
+        # Count members with vanity roles
+        vanity_role_count = 0
+        for role_id in mapping.values():
+            role = interaction.guild.get_role(int(role_id))
+            if role:
+                vanity_role_count += len(role.members)
+
+        embed.add_field(name="👥 Members with Vanity Roles", value=f"**{vanity_role_count}**", inline=True)
+        embed.add_field(name="🎭 Configured Triggers", value=f"**{len(mapping)}**", inline=True)
+        embed.add_field(name="🔄 Check Frequency", value="**Every 5 minutes**", inline=True)
+        embed.add_field(name="💾 Storage Type", value="**JSON File**", inline=True)
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="vanity_export", description="Export vanity role data (Owner only)")
+    async def vanity_export(self, interaction: discord.Interaction):
+        """Export vanity role data as JSON"""
+        if interaction.user.id != self.get_owner_id():
+            await interaction.response.send_message("❌ Owner only command.", ephemeral=True)
+            return
+        
+        try:
+            data = self._load_vanity_data()
+            
+            # Create a readable export
+            export_data = {
+                "export_date": discord.utils.utcnow().isoformat(),
+                "total_guilds": len(data.get("guilds", {})),
+                "guilds": {}
+            }
+            
+            for guild_id, roles in data.get("guilds", {}).items():
+                guild = self.bot.get_guild(int(guild_id))
+                guild_name = guild.name if guild else f"Unknown Guild ({guild_id})"
+                
+                export_data["guilds"][guild_name] = {
+                    "guild_id": guild_id,
+                    "vanity_roles": roles
+                }
+            
+            # Save export
+            export_path = self.get_data_path("vanity_export.json")
+            with open(export_path, "w", encoding="utf-8") as f:
+                json.dump(export_data, f, indent=2, ensure_ascii=False)
+            
+            embed = discord.Embed(
+                title="📤 Vanity Data Exported",
+                description=f"Exported data for **{len(data.get('guilds', {}))}** guilds",
+                color=0x00ff00
+            )
+            embed.add_field(name="File Location", value=f"`{export_path}`", inline=False)
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Export failed: {e}", ephemeral=True)
+
+async def setup(bot):
+    await bot.add_cog(Vanity(bot))

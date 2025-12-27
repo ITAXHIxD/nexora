@@ -1,0 +1,9 @@
+{
+  "channel_type": "text",
+  "channel_id": 1423249106041835550,
+  "send_mode": "every_message",
+  "guidelines_message": "give your intro here\nname\nage\ngender\nwork/study {job ,class year degree}\ndream\nhobby\nyou like to talk about or way of your talking\ntype of people or behaviour you hate\ndms - open or closed",
+  "enabled": false,
+  "last_sent": "2025-10-02T18:23:53.597132",
+  "sent_users": []
+}

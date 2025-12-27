@@ -1,0 +1,13 @@
+{
+  "channel_type": "forum",
+  "channel_id": 1420420091866255512,
+  "send_mode": "thread_creation",
+  "guidelines_message": "thank user and don't ping anyone if your work is done use /close_thread",
+  "message_type": "plain",
+  "embed_title": "📋 Guidelines",
+  "embed_color": "3498db",
+  "embed_footer": "Automatic guidelines message",
+  "enabled": true,
+  "last_sent": null,
+  "sent_users": []
+}
