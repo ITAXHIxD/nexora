@@ -1,0 +1,72 @@
+{
+  "subscriptions": {
+    "1087039578931724468": {
+      "tier": "ULTRA",
+      "expires_at": null,
+      "purchased_by": "1013851779886231685"
+    },
+    "1072508777623990362": {
+      "tier": "ULTRA",
+      "expires_at": "2025-11-25T19:10:31.609388",
+      "purchased_by": "1013851779886231685"
+    },
+    "1342893749209923614": {
+      "tier": "ULTRA",
+      "expires_at": null,
+      "purchased_by": "1013851779886231685"
+    },
+    "1390215980470505523": {
+      "tier": "ULTRA",
+      "expires_at": "2025-11-25T19:12:10.123456",
+      "purchased_by": "1390215980470505523"
+    },
+    "1370284519134859384": {
+      "tier": "CUSTOM",
+      "expires_at": null,
+      "purchased_by": "1013851779886231685"
+    }
+  },
+  "vanity": {
+    "roles": {
+      "1087039578931724468": {
+        "onepiece paglu": "1087039578931724477",
+        "onepiece": "1087039578969485385",
+        "starman.": "1087039578931724474"
+      },
+      "1342893749209923614": {
+        "talkindia": "1389573657147473940"
+      }
+    },
+    "settings": {
+      "1087039578931724468": {
+        "match_mode": "substring",
+        "priority_mode": "longest_first",
+        "case_sensitive": false,
+        "enabled_triggers": [],
+        "log_channel_id": 1419256239799533668,
+        "log_events": [],
+        "log_webhook": "https://discord.com/api/webhooks/1423618511976271883/v9Ibaf6OZ5UnSmARtHtEkXKfsIZK2P31pKrCDpMMpawPOQK2O6qbAxyheHG6iZzBDpKJ",
+        "log_enabled": true
+      },
+      "1342893749209923614": {
+        "match_mode": "substring",
+        "priority_mode": "all_matches",
+        "case_sensitive": false,
+        "enabled_triggers": [
+          "talkindia"
+        ],
+        "log_enabled": false,
+        "log_channel_id": 1423364233768468631,
+        "log_events": [
+          "role_changes",
+          "settings_changed",
+          "permission_issues",
+          "status_detection"
+        ],
+        "log_webhook": "https://discord.com/api/webhooks/1423369769570140211/O35gi7f3Uj3etTa1L9NgAKCXsxNPXKAA2tayYyiixBBrQThW6dQ1GMbtcqckS1_NrIkl",
+        "role_log_enabled": true
+      }
+    }
+  },
+  "grandfathered": []
+}

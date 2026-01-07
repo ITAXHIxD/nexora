@@ -2,7 +2,8 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from datetime import datetime
-
+import logging
+logger = logging.getLogger(__name__)
 # --- Helper Function for Color Consistency ---
 def get_config_color(bot, key: str, fallback: int = 0x5865F2) -> int:
     """Safely retrieves a color from the bot config."""

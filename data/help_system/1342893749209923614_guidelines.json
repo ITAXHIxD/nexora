@@ -2,12 +2,12 @@
   "channel_type": "text",
   "channel_id": 1434138435035201556,
   "send_mode": "every_message",
-  "guidelines_message": "use /confess <your message> or n!confess to do confession bot will delete that message and send a confession with no identity",
+  "guidelines_message": "use /confess <your message> or n!confess to do confession bot will delete that message and send a confession with no identity\n\nprefer /confess over n!confess due to message loggings the deleted message may reveal your identity",
   "message_type": "plain",
   "embed_title": "📋 Guidelines",
   "embed_color": "3498db",
   "embed_footer": "Automatic guidelines message",
   "enabled": true,
-  "last_sent": "2025-12-27T21:49:16.676716",
+  "last_sent": "2026-01-07T17:04:52.624579",
   "sent_users": []
 }

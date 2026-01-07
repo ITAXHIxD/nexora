@@ -36,6 +36,14 @@ class Owner(commands.Cog):
             color=embed_color
         )
         await ctx.send(embed=embed, ephemeral=True)
+    @commands.command()
+    @commands.is_owner()
+    async def activate(self, ctx, guild_id: str, tier: str):
+        """!activate 123456789 ULTRA - Owner gives premium"""
+        data = self._get_data()
+        data["subscriptions"][guild_id] = {"tier": tier.upper(), "expires_at": None}
+        self._save_data(data)
+        await ctx.send(f"✅ **{tier}** activated for {guild_id}")
 
     @commands.hybrid_command(name="force_resync", description="Force resync all commands.")
     @is_owner()
