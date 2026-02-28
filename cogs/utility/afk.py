@@ -12,7 +12,6 @@ import asyncio
 logger = logging.getLogger(__name__)
 log = logger  # Alias for compatibility
 
-
 class AFKView(discord.ui.View):
     """View with buttons for AFK notifications"""
     def __init__(self, timeout=180):
@@ -27,7 +26,6 @@ class AFKView(discord.ui.View):
             await interaction.response.send_message("✅ Your AFK status has been removed!", ephemeral=True)
         else:
             await interaction.response.send_message("❌ You are not currently AFK!", ephemeral=True)
-
 
 class AFK(commands.Cog):
     """AFK system with persistent storage and notifications"""
@@ -128,7 +126,7 @@ class AFK(commands.Cog):
                         await member.edit(nick=None)
             except discord.Forbidden:
                 logger.warning("Missing permissions to change nickname for user %s in guild %s", 
-                           member.id, guild.id)
+                              member.id, guild.id)
             except discord.HTTPException as e:
                 logger.error("HTTP error restoring nickname: %s", str(e))
             except Exception as e:
@@ -174,7 +172,7 @@ class AFK(commands.Cog):
                     description="❌ You are already AFK! Send a message to remove your AFK status.",
                     color=discord.Color.red()
                 )
-                return await ctx.send(embed=embed, ephemeral=True)
+                return await ctx.send(embed=embed)
             
             # Store original name (without [AFK] prefix if present)
             original_name = member.display_name.replace("[AFK] ", "")
@@ -197,7 +195,7 @@ class AFK(commands.Cog):
                     new_nick = f"[AFK] {original_name}"[:32]
                     await member.edit(nick=new_nick)
             except discord.Forbidden:
-                await ctx.send("Missing permissions to change nickname for user %s in", member.id)
+                logger.warning("Missing permissions to change nickname for user %s in guild %s", member.id, ctx.guild.id)
             except Exception as e:
                 logger.error("Error changing nickname: %s", str(e))
 
@@ -220,7 +218,7 @@ class AFK(commands.Cog):
                 description="❌ An error occurred while setting your AFK status.",
                 color=discord.Color.red()
             )
-            await ctx.send(embed=embed, ephemeral=True)
+            await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="unafk", description="Manually remove your AFK status")
     async def unafk(self, ctx: commands.Context):
@@ -230,7 +228,7 @@ class AFK(commands.Cog):
                 description="❌ You are not currently AFK!",
                 color=discord.Color.red()
             )
-            return await ctx.send(embed=embed, ephemeral=True)
+            return await ctx.send(embed=embed)
         
         afk_data = self.afk_users.get(ctx.author.id)
         duration = "Unknown"
@@ -246,7 +244,7 @@ class AFK(commands.Cog):
                 color=discord.Color.green()
             )
             await ctx.send(embed=embed)
-            
+
     @commands.hybrid_command(name="afkstatus", description="Check your or another user's AFK status")
     @app_commands.describe(user="The user to check (optional)")
     async def afkstatus(self, ctx: commands.Context, user: Optional[discord.Member] = None):
@@ -376,7 +374,7 @@ class AFK(commands.Cog):
                             await welcome_msg.delete()
                         except:
                             pass
-                        
+            
             # Notify if mentioned user is AFK
             if message.mentions:
                 for mentioned_user in message.mentions:
@@ -415,20 +413,20 @@ class AFK(commands.Cog):
                                     dm_embed = discord.Embed(
                                         title="📬 New Mention While AFK",
                                         description=f"**From:** {message.author.mention} in {message.guild.name}\n"
-                                                   f"**Channel:** {message.channel.mention}\n"
-                                                   f"**Message:** {message.content[:100] if message.content else '*No content*'}...\n\n"
-                                                   f"[Jump to Message]({message.jump_url})",
+                                                 f"**Channel:** {message.channel.mention}\n"
+                                                 f"**Message:** {message.content[:100] if message.content else '*No content*'}...\n\n"
+                                                 f"[Jump to Message]({message.jump_url})",
                                         color=discord.Color.blue(),
                                         timestamp=datetime.datetime.now(datetime.timezone.utc)
                                     )
                                     await mentioned_user.send(embed=dm_embed)
                                 except discord.Forbidden:
-                                    log.warning("Cannot send DM to user %s", mentioned_user.id)
+                                    logger.warning("Cannot send DM to user %s", mentioned_user.id)
                                 except Exception as e:
-                                    log.error("Error sending DM: %s", str(e))
-                    
+                                    logger.error("Error sending DM: %s", str(e))
+                
         except Exception as e:
-            log.error("Error in on_message event: %s", str(e))
+            logger.error("Error in on_message event: %s", str(e))
 
     @commands.Cog.listener()
     async def on_member_update(self, before, after):
@@ -439,15 +437,14 @@ class AFK(commands.Cog):
                 if before.display_name.startswith("[AFK] ") and not after.display_name.startswith("[AFK] "):
                     original_name = self.afk_users[before.id]['name']
                     await after.edit(nick=f"[AFK] {original_name}"[:32])
-                    log.info("Re-applied AFK tag for user %s", before.id)
+                    logger.info("Re-applied AFK tag for user %s", before.id)
             except Exception as e:
-                log.debug("Could not re-apply AFK tag: %s", str(e))
+                logger.debug("Could not re-apply AFK tag: %s", str(e))
 
     async def cog_unload(self):
         """Clean up when cog is unloaded"""
         self.save_afk_data()
         logger.info("%s unloaded", self.__class__.__name__)
-
 
 async def setup(bot):
     await bot.add_cog(AFK(bot))

@@ -1,0 +1,38 @@
+{
+    "1342893749209923614": [
+        {
+            "user_id": 1013851779886231685,
+            "content": "yohoho",
+            "time": "2026-01-26 18:43:18",
+            "confession_number": 1,
+            "username": "itaxhi_xd."
+        },
+        {
+            "confession_number": 2,
+            "username": "itaxhi_xd.",
+            "user_id": 1013851779886231685,
+            "user_discriminator": "0",
+            "content": "hello",
+            "timestamp": "2026-01-26T19:27:06.362019",
+            "channel_id": 1434138435035201556
+        },
+        {
+            "confession_number": 3,
+            "username": "itaxhi_xd.",
+            "user_id": 1013851779886231685,
+            "user_discriminator": "0",
+            "content": "hello",
+            "timestamp": "2026-01-26T19:30:34.008829",
+            "channel_id": 1434138435035201556
+        },
+        {
+            "confession_number": 4,
+            "username": "plutolostinspace",
+            "user_id": 1380096503414001765,
+            "user_discriminator": "0",
+            "content": "checkcheck",
+            "timestamp": "2026-02-28T10:40:38.417588",
+            "channel_id": 1434138435035201556
+        }
+    ]
+}
