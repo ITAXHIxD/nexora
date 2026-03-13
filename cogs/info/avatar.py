@@ -3,7 +3,8 @@ from discord.ext import commands
 from discord import app_commands
 import random
 import asyncio
-
+import logging
+logger = logging.getLogger(__name__)
 class AvatarView(discord.ui.View):
     def __init__(self, user: discord.User, bot):
         super().__init__(timeout=60)

@@ -20,7 +20,7 @@ class Blush(commands.Cog):
             target,
             "blush",
             text_template="**{author}** blushes at **{target}**… omg cute— 🥺💗",
-            self_template="**{author}** blushes at themselves in a mirror… precious baby.",
+            self_template="**{author}** got blushed ",
         )
 
 

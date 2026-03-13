@@ -8,180 +8,262 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 class Confession(commands.Cog):
-    """Anonymous confession system with per‑server channel + counters."""
+    """Anonymous confession system. Logging and tracing restricted to Bot Owner only."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.data_file = "data/confessions.json"
-        os.makedirs("data", exist_ok=True)
 
-        # {
-        #   "guild_id": {
-        #       "channel_id": int | null,
-        #       "counter": int
-        #   }
-        # }
-        self.guild_data = {}
-        self._load()
+        # Use a stable project-level data folder
+        base_path = os.getcwd()
+        self.data_dir = os.path.join(base_path, "data", "confessions")
+        os.makedirs(self.data_dir, exist_ok=True)
+
+        self.config_file = os.path.join(self.data_dir, "confessions.json")
+        self.log_file = os.path.join(self.data_dir, "confession_logs.json")
+
+        # in-memory storage
+        self.guild_data: dict[str, dict] = {}
+        self.identity_logs: dict[str, list] = {}
+
+        self._load_all()
 
     # ---------- persistence ----------
 
-    def _load(self):
-        if not os.path.exists(self.data_file):
-            self.guild_data = {}
-            return
-        try:
-            with open(self.data_file, "r", encoding="utf-8") as f:
-                self.guild_data = json.load(f)
-        except Exception as e:
-            logger.error("Failed to load confessions file: %s", e)
+    def _load_all(self):
+        """Load both config and logs from disk."""
+        # Load config
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, "r", encoding="utf-8") as f:
+                    self.guild_data = json.load(f)
+                logger.info("Confession config loaded successfully")
+            except Exception as e:
+                logger.error(f"Failed to load confessions config: {e}")
+                self.guild_data = {}
+        else:
             self.guild_data = {}
 
-    def _save(self):
+        # Load logs - BACKWARD COMPATIBILITY
+        if os.path.exists(self.log_file):
+            try:
+                with open(self.log_file, "r", encoding="utf-8") as f:
+                    self.identity_logs = json.load(f)
+                
+                # FIX: Migrate old log format to new format
+                for gid, logs in self.identity_logs.items():
+                    for i, entry in enumerate(logs):
+                        if "id" in entry and "confession_number" not in entry:
+                            entry["confession_number"] = entry.pop("id")
+                        if "user" in entry and "username" not in entry:
+                            entry["username"] = entry.pop("user")
+                
+                logger.info("Confession logs loaded and migrated successfully")
+            except Exception as e:
+                logger.error(f"Failed to load identity logs: {e}")
+                self.identity_logs = {}
+        else:
+            self.identity_logs = {}
+
+    def _save_config(self):
+        """Save guild config to disk."""
         try:
-            with open(self.data_file, "w", encoding="utf-8") as f:
-                json.dump(self.guild_data, f, indent=4)
+            with open(self.config_file, "w", encoding="utf-8") as f:
+                json.dump(self.guild_data, f, indent=4, ensure_ascii=False)
         except Exception as e:
-            logger.error("Failed to save confessions file: %s", e)
+            logger.error(f"Failed to save confessions config: {e}")
+
+    def _save_log(self):
+        """Save identity logs to disk."""
+        try:
+            with open(self.log_file, "w", encoding="utf-8") as f:
+                json.dump(self.identity_logs, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Failed to save identity logs: {e}")
 
     def _get_guild_cfg(self, guild: discord.Guild) -> dict:
+        """Get or initialize guild config."""
         gid = str(guild.id)
         if gid not in self.guild_data:
-            self.guild_data[gid] = {
-                "channel_id": None,
-                "counter": 0
-            }
+            self.guild_data[gid] = {"channel_id": None, "counter": 0}
         return self.guild_data[gid]
+
+    def _get_confession_number(self, entry: dict) -> int:
+        """Get confession number from entry (supports both old and new format)."""
+        return entry.get("confession_number") or entry.get("id", 0)
 
     # ---------- commands ----------
 
     @commands.hybrid_command(
         name="confessionsetup",
-        description="Set or change this server's confession channel."
+        description="Set the confession channel."
     )
     @commands.has_permissions(manage_guild=True)
-    @app_commands.describe(
-        channel="Channel where anonymous confessions will be posted"
-    )
-    async def confession_setup(
-        self,
-        ctx: commands.Context,
-        channel: discord.TextChannel
-    ):
+    async def confession_setup(self, ctx: commands.Context, channel: discord.TextChannel):
+        """Setup confession channel for the server."""
         cfg = self._get_guild_cfg(ctx.guild)
         cfg["channel_id"] = channel.id
-        self._save()
+        cfg.setdefault("counter", 0)
+        self._save_config()
+        await ctx.send(f"✅ Confession channel set to {channel.mention}")
 
-        embed = discord.Embed(
-            title="✅ Confession channel set",
-            description=f"All anonymous confessions will now be sent in {channel.mention}.",
-            color=discord.Color.green(),
-            timestamp=datetime.datetime.now(datetime.timezone.utc)
-        )
-        embed.set_footer(text=f"Configured by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+    @commands.hybrid_command(
+        name="confessionlist",
+        description="[ADMIN ONLY] List all configured confession channels."
+    )
+    @commands.has_permissions(manage_guild=True)
+    async def confession_list(self, ctx: commands.Context):
+        """List all servers with configured confession channels."""
+        if not self.guild_data:
+            return await ctx.send("❌ No confession channels configured yet.", ephemeral=True)
 
-        await ctx.send(embed=embed)
+        embed = discord.Embed(title="📋 All Confession Channels", color=discord.Color.blue())
+        
+        for gid, cfg in self.guild_data.items():
+            guild = self.bot.get_guild(int(gid))
+            if guild:
+                channel = guild.get_channel(cfg.get("channel_id"))
+                channel_mention = channel.mention if channel else f"ID: {cfg.get('channel_id')} (deleted)"
+                embed.add_field(
+                    name=guild.name[:256],
+                    value=f"{channel_mention}\nConfessions: {cfg.get('counter', 0)}",
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name=f"Server ID: {gid}",
+                    value=f"Channel ID: {cfg.get('channel_id')}\nConfessions: {cfg.get('counter', 0)}",
+                    inline=False
+                )
+
+        await ctx.send(embed=embed, ephemeral=True)
 
     @commands.hybrid_command(
         name="confess",
-        description="Send an anonymous confession to the server's confession channel."
-    )
-    @app_commands.describe(
-        text="Your confession (your name will NOT be shown)"
+        description="Send an anonymous confession."
     )
     async def confess(self, ctx: commands.Context, *, text: str):
+        """Send anonymous confession to configured channel."""
         cfg = self._get_guild_cfg(ctx.guild)
         channel_id = cfg.get("channel_id")
 
         if not channel_id:
-            # for slash -> ephemeral; for prefix -> normal reply
-            if ctx.interaction:
-                await ctx.send(
-                    "❌ Confession channel is not set yet. Ask a staff member to run `/confessionsetup`.",
-                    ephemeral=True
-                )
-            else:
-                await ctx.reply(
-                    "❌ Confession channel is not set yet. Ask a staff member to run `/confessionsetup`."
-                )
-            return
+            return await ctx.send("❌ Confession channel not set. Use `/confessionsetup <channel>`", ephemeral=True)
 
         channel = ctx.guild.get_channel(channel_id)
-        if channel is None:
-            if ctx.interaction:
-                await ctx.send(
-                    "❌ The configured confession channel no longer exists. Please ask staff to set it again.",
-                    ephemeral=True
-                )
-            else:
-                await ctx.reply(
-                    "❌ The configured confession channel no longer exists. Please ask staff to set it again."
-                )
-            return
+        if not channel:
+            return await ctx.send("❌ The saved confession channel no longer exists.", ephemeral=True)
 
-        # Increase counter
-        cfg["counter"] = cfg.get("counter", 0) + 1
-        confession_id = cfg["counter"]
-        self._save()
+        # Increment counter and save
+        cfg["counter"] = int(cfg.get("counter", 0)) + 1
+        count = cfg["counter"]
+        self._save_config()
 
-        # Build anonymous embed that goes ONLY to the confession channel
+        # Log identity with NEW format
+        gid = str(ctx.guild.id)
+        if gid not in self.identity_logs:
+            self.identity_logs[gid] = []
+
+        log_entry = {
+            "confession_number": count,
+            "username": str(ctx.author),
+            "user_id": ctx.author.id,
+            "user_discriminator": ctx.author.discriminator,
+            "content": text,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "channel_id": channel_id
+        }
+        
+        self.identity_logs[gid].append(log_entry)
+        self._save_log()
+
+        # Send public confession
         embed = discord.Embed(
-            title=f"🕊️ Confession #{confession_id}",
+            title=f"🕊️ Confession #{count}",
             description=text,
             color=discord.Color.random(),
             timestamp=datetime.datetime.now(datetime.timezone.utc)
         )
         await channel.send(embed=embed)
 
-        # ---------- prefix behaviour ----------
-        if not ctx.interaction:
-            # delete the original command message so chat does not see who confessed
+        # User feedback
+        feedback = f"✅ Sent as confession **#{count}**"
+        if ctx.interaction:
+            await ctx.send(feedback, ephemeral=True)
+        else:
             try:
                 await ctx.message.delete()
-            except discord.Forbidden:
+            except Exception:
                 pass
 
-            # DM the user a confirmation
-            try:
-                await ctx.author.send(
-                    f"✅ Your anonymous confession **#{confession_id}** has been sent in {channel.mention}."
-                )
-            except discord.Forbidden:
-                # fall back to a quiet message in the channel
-                await channel.send(
-                    f"✅ An anonymous confession **#{confession_id}** was sent (could not DM the user).",
-                    delete_after=5
-                )
-            return
+    @commands.hybrid_command(
+        name="confessiontrace",
+        description="[OWNER ONLY] Trace a confession by number."
+    )
+    @commands.is_owner()
+    async def confession_trace(self, ctx: commands.Context, number: int):
+        """Trace confession author (Bot Owner only)."""
+        gid = str(ctx.guild.id)
+        logs = self.identity_logs.get(gid, [])
+        
+        # FIXED: Handle both old ("id") and new ("confession_number") formats
+        entry = next((item for item in logs if self._get_confession_number(item) == number), None)
+        
+        if not entry:
+            return await ctx.send(f"❌ Confession **#{number}** not found in logs.", ephemeral=True)
 
-        # ---------- slash behaviour ----------
-        # For slash commands: ephemeral confirmation so only the user sees it
-        await ctx.send(
-            f"✅ Your anonymous confession **#{confession_id}** has been sent.",
-            ephemeral=True
+        # Handle both old and new field names
+        conf_num = self._get_confession_number(entry)
+        username = entry.get("username") or entry.get("user", "Unknown")
+        user_id = entry.get("user_id", "Unknown")
+        timestamp = entry.get("timestamp") or entry.get("time", "Unknown")
+        content = entry.get("content", "No content")
+
+        embed = discord.Embed(
+            title=f"🔍 Trace: Confession #{conf_num}",
+            color=discord.Color.red()
+        )
+        embed.add_field(
+            name="👤 Author",
+            value=f"`{username}`\nID: `{user_id}`",
+            inline=False
+        )
+        embed.add_field(
+            name="📝 Content",
+            value=content[:1024],
+            inline=False
+        )
+        embed.add_field(
+            name="📊 Details",
+            value=f"Channel: <#{entry.get('channel_id', 'Unknown')}>\nLogged: {timestamp}",
+            inline=False
         )
 
+        await ctx.send(embed=embed, ephemeral=True)
 
     @commands.hybrid_command(
         name="confessionstats",
-        description="Show confession stats for this server."
+        description="[OWNER ONLY] Show confession statistics."
     )
+    @commands.is_owner()
     async def confession_stats(self, ctx: commands.Context):
+        """Show confession statistics for current guild."""
+        gid = str(ctx.guild.id)
         cfg = self._get_guild_cfg(ctx.guild)
-        total = cfg.get("counter", 0)
-
-        embed = discord.Embed(
-            title="📊 Confession stats",
-            color=discord.Color.blurple(),
-            timestamp=datetime.datetime.now(datetime.timezone.utc)
+        logs = self.identity_logs.get(gid, [])
+        
+        embed = discord.Embed(title="📊 Confession Stats", color=discord.Color.green())
+        embed.add_field(name="Total Confessions", value=str(cfg.get("counter", 0)), inline=True)
+        embed.add_field(name="Logged Entries", value=str(len(logs)), inline=True)
+        channel_id = cfg.get("channel_id")
+        channel = ctx.guild.get_channel(channel_id) if channel_id else None
+        embed.add_field(
+            name="Channel", 
+            value=channel.mention if channel else "Not set", 
+            inline=True
         )
-        embed.add_field(name="Total confessions", value=str(total), inline=True)
-
-        await ctx.send(embed=embed)
-
+        
+        await ctx.send(embed=embed, ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Confession(bot))
-    logger.info("Loaded Confession cog")

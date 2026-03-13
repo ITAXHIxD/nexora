@@ -57,7 +57,7 @@ STYLE_PRESETS.update({
     },
     "kick": {
         "emoji": "🦵",
-        "label": "Kick",
+        "label": "Kicks",
         "color": discord.Color.from_rgb(255, 200, 100),
     },
     "kill": {
