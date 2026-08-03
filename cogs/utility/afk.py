@@ -23,7 +23,6 @@ class AFKView(discord.ui.View):
                 return await interaction.response.send_message("✅ AFK status removed!", ephemeral=True)
         await interaction.response.send_message("❌ You are not currently AFK!", ephemeral=True)
 
-
 class AFK(commands.Cog):
     """AFK system — MongoDB via bot.mongo_db"""
 
@@ -261,7 +260,6 @@ class AFK(commands.Cog):
                     await after.edit(nick=f"[AFK] {afk_data.get('name', '')}"[:32])
             except Exception:
                 pass
-
 
 async def setup(bot):
     await bot.add_cog(AFK(bot))

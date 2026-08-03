@@ -366,16 +366,96 @@ class CharacterBot(commands.Bot):
 
     @tasks.loop(minutes=5)
     async def update_activity(self):
-        activity = await self.get_dynamic_activity()
-        await self.change_presence(activity=activity, status=discord.Status.online)
-        logger.info("Updated activity to: %s", activity.name)
+        try:
+            activity = await self.get_dynamic_activity()
+            await self.change_presence(activity=activity, status=discord.Status.online)
+            logger.info(f"Updated activity to: {activity.name}")
+        except Exception as e:
+            logger.error(f"Error updating activity: {e}")
 
-    @update_activity.before_loop
-    async def before_update_activity(self):
-        await self.wait_until_ready()
+    async def setup_hook(self):
+        # load extensions (cogs)
+        self.session = aiohttp.ClientSession()
+        for ext in [
+            # Core utilities
+            "cogs.core.status",
+            "cogs.core.help",
+        
+            # Analytics
+            "cogs.analytics.analytics",
+            #fun
+            "cogs.fun.confession",
+            "cogs.fun.ship",
+            "cogs.fun.kick",
+            "cogs.fun.punch",
+            "cogs.fun.bonk",
+            "cogs.fun.poke",
+            "cogs.fun.pat",
+            "cogs.fun.boop",
+            "cogs.fun.slap",
+            "cogs.fun.blush",
+            "cogs.fun.hug",
+            "cogs.fun.cuddle",
+            "cogs.fun.bite",
+            "cogs.fun.kill",
+            
+            # Games
+            "cogs.games.guess",
+            "cogs.games.say",
+        
+            # Info commands
+            "cogs.info.botinfo",
+            "cogs.info.invite",
+            "cogs.info.serverinfo",
+            "cogs.info.userinfo",
+            "cogs.info.avatar",
+            "cogs.info.randomavatar",
+            "cogs.info.roleinfo",
+            "cogs.info.channelinfo",
+        
+            # Owner commands
+            "cogs.owner.owner",
+            "cogs.owner.premium",
+        
+            # Premium / special features
+            "cogs.premium.vanity",
 
+            # system/special command
+            "cogs.system.guideline_mode",
+            "cogs.system.thread_manager",
 
-# ── Bot instance ───────────────────────────────────────────────────────────────
+            #utility
+            "cogs.utility.afk",
+            "cogs.utility.steal",
+            "cogs.utility.spotifyview",
+
+            # Moderation
+            "cogs.moderation.snipe"
+        ]:
+            try:
+                await self.load_extension(ext)
+                logger.info(f"Loaded extension: {ext}")
+            except Exception as e:
+                logger.error(f"Failed to load {ext}: {e}")
+
+        # IMPORTANT: Sync the app command tree
+        try:
+            # Global sync
+            if bot_config['bot_settings']['auto_sync_commands']:
+                cmds = await self.tree.sync()
+                logger.info(f"App commands synced globally: {len(cmds)}")
+        except Exception as e:
+            logger.error(f"Global sync failed: {e}")
+
+        # Optional: per-guild fast sync during development
+        try:
+            TEST_GUILD_ID = 1087039578931724468
+            if TEST_GUILD_ID:
+                guild = discord.Object(id=TEST_GUILD_ID)
+                cmds = await self.tree.sync(guild=guild)
+                logger.info(f"App commands synced to guild {TEST_GUILD_ID}: {len(cmds)}")
+        except Exception as e:
+            logger.error(f"Guild sync failed: {e}")
 
 bot = CharacterBot()
 
@@ -440,16 +520,41 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
         await ctx.send("⚠️ This command is already running.")
         return
 
-    bot.bot_stats["errors_encountered"] += 1
-    logger.exception("Error in command '%s': %s", getattr(ctx.command, "qualified_name", "unknown"), error)
-    await ctx.send("❌ An unexpected error occurred and has been logged.")
 
-
-# ── Entry point ────────────────────────────────────────────────────────────────
-
-async def main():
-    await bot.start(DISCORD_TOKEN)
-
+@bot.event
+async def on_command_error(ctx, error):
+    """Global error handler for all commands"""
+    if isinstance(error, commands.CommandNotFound):
+        print("Unknown command invoked.", ctx.command)
+        return  # Silently ignore unknown commands
+    
+    elif isinstance(error, commands.MissingRequiredArgument):
+        embed = discord.Embed(
+            title="❌ Missing Arguments",
+            description=f"**Usage:** `{ctx.prefix}{ctx.command.qualified_name}`\n\n"
+                       f"Missing: `{error.param.name}`\n"
+                       f"**Example:** `{ctx.prefix}{ctx.command} 123456 ultra 30`",
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed)
+    
+    elif isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ Missing permissions! You need `Manage Roles` or higher.")
+    
+    elif isinstance(error, commands.MissingRole):
+        await ctx.send("❌ Missing required role!")
+    
+    elif isinstance(error, commands.CheckFailure):
+        await ctx.send("❌ You don't have access to this command!")
+    
+    elif isinstance(error, commands.CommandOnCooldown):
+        await ctx.send(f"⏳ Slow down! Try again in **{error.retry_after:.1f}s**")
+    
+    elif isinstance(error, commands.MaxConcurrencyReached):
+        await ctx.send("⚠️ This command is already running!")
+    else:
+        logger.error(f"Error in command '{ctx.command}': {error}")
+        await ctx.send("❌ An unexpected error occurred. The issue has been logged.")
 
 if __name__ == "__main__":
     try:
