@@ -556,6 +556,10 @@ async def on_command_error(ctx, error):
         logger.error(f"Error in command '{ctx.command}': {error}")
         await ctx.send("❌ An unexpected error occurred. The issue has been logged.")
 
+async def main():
+    await asyncio.sleep(20)
+    await bot.start(DISCORD_TOKEN)
+
 if __name__ == "__main__":
     try:
         asyncio.run(main())
