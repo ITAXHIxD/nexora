@@ -88,11 +88,14 @@ if TYPE_CHECKING:
         use_soundboard: BoolOrNoneT
         use_external_sounds: BoolOrNoneT
         send_voice_messages: BoolOrNoneT
+        set_voice_channel_status: BoolOrNoneT
         create_expressions: BoolOrNoneT
         create_events: BoolOrNoneT
         send_polls: BoolOrNoneT
         create_polls: BoolOrNoneT
         use_external_apps: BoolOrNoneT
+        pin_messages: BoolOrNoneT
+        bypass_slowmode: BoolOrNoneT
 
     class _PermissionsKwargs(_BasePermissionsKwargs[bool]): ...
 
@@ -251,7 +254,7 @@ class Permissions(BaseFlags):
         permissions set to ``True``.
         """
         # Some of these are 0 because we don't want to set unnecessary bits
-        return cls(0b0000_0000_0000_0110_0111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111)
+        return cls(0b0000_0000_0001_1111_0111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111_1111)
 
     @classmethod
     def _timeout_mask(cls) -> int:
@@ -266,10 +269,12 @@ class Permissions(BaseFlags):
         base.read_messages = True
         base.send_tts_messages = False
         base.manage_messages = False
+        base.pin_messages = True
         base.create_private_threads = False
         base.create_public_threads = False
         base.manage_threads = False
         base.send_messages_in_threads = False
+        base.bypass_slowmode = False
         return base
 
     @classmethod
@@ -323,8 +328,11 @@ class Permissions(BaseFlags):
         .. versionchanged:: 2.4
             Added :attr:`send_polls`, :attr:`send_voice_messages`, attr:`use_external_sounds`,
             :attr:`use_embedded_activities`, and :attr:`use_external_apps` permissions.
+
+        .. versionchanged:: 2.7
+            Added :attr:`pin_messages` and :attr:`bypass_slowmode` permissions.
         """
-        return cls(0b0000_0000_0000_0110_0110_0100_1111_1101_1011_0011_1111_0111_1111_1111_0101_0001)
+        return cls(0b0000_0000_0001_1110_0110_0100_1111_1101_1011_0011_1111_0111_1111_1111_0101_0001)
 
     @classmethod
     def general(cls) -> Self:
@@ -372,14 +380,21 @@ class Permissions(BaseFlags):
 
         .. versionchanged:: 2.4
             Added :attr:`send_polls` and :attr:`use_external_apps` permissions.
+
+        .. versionchanged:: 2.7
+            Added :attr:`pin_messages` and :attr:`bypass_slowmode` permissions.
         """
-        return cls(0b0000_0000_0000_0110_0100_0000_0111_1100_1000_0000_0000_0111_1111_1000_0100_0000)
+        return cls(0b0000_0000_0001_1110_0100_0000_0111_1100_1000_0000_0000_0111_1111_1000_0100_0000)
 
     @classmethod
     def voice(cls) -> Self:
         """A factory method that creates a :class:`Permissions` with all
-        "Voice" permissions from the official Discord UI set to ``True``."""
-        return cls(0b0000_0000_0000_0000_0010_0100_1000_0000_0000_0011_1111_0000_0000_0011_0000_0000)
+        "Voice" permissions from the official Discord UI set to ``True``.
+
+        .. versionchanged:: 2.7
+            Added :attr:`set_voice_channel_status` permission.
+        """
+        return cls(0b0000_0000_0000_0001_0010_0100_1000_0000_0000_0011_1111_0000_0000_0011_0000_0000)
 
     @classmethod
     def stage(cls) -> Self:
@@ -567,7 +582,7 @@ class Permissions(BaseFlags):
 
     @flag_value
     def manage_messages(self) -> int:
-        """:class:`bool`: Returns ``True`` if a user can delete or pin messages in a text channel.
+        """:class:`bool`: Returns ``True`` if a user can delete messages in a text channel.
 
         .. note::
 
@@ -835,6 +850,14 @@ class Permissions(BaseFlags):
         return 1 << 46
 
     @flag_value
+    def set_voice_channel_status(self) -> int:
+        """:class:`bool`: Returns ``True`` if a user can set voice channel status.
+
+        .. versionadded:: 2.7
+        """
+        return 1 << 48
+
+    @flag_value
     def send_polls(self) -> int:
         """:class:`bool`: Returns ``True`` if a user can send poll messages.
 
@@ -857,6 +880,22 @@ class Permissions(BaseFlags):
         .. versionadded:: 2.4
         """
         return 1 << 50
+
+    @flag_value
+    def pin_messages(self) -> int:
+        """:class:`bool`: Returns ``True`` if a user can pin messages.
+
+        .. versionadded:: 2.7
+        """
+        return 1 << 51
+
+    @flag_value
+    def bypass_slowmode(self) -> int:
+        """:class:`bool`: Returns ``True`` if a user can bypass slowmode.
+
+        .. versionadded:: 2.7
+        """
+        return 1 << 52
 
 
 def _augment_from_permissions(cls):
@@ -976,11 +1015,14 @@ class PermissionOverwrite:
         use_soundboard: Optional[bool]
         use_external_sounds: Optional[bool]
         send_voice_messages: Optional[bool]
+        set_voice_channel_status: Optional[bool]
         create_expressions: Optional[bool]
         create_events: Optional[bool]
         send_polls: Optional[bool]
         create_polls: Optional[bool]
         use_external_apps: Optional[bool]
+        pin_messages: Optional[bool]
+        bypass_slowmode: Optional[bool]
 
     def __init__(self, **kwargs: Unpack[_PermissionOverwriteKwargs]) -> None:
         self._values: Dict[str, Optional[bool]] = {}

@@ -92,6 +92,7 @@ EXTENSIONS = [
     "cogs.fun.bite",
     "cogs.fun.kill",
     "cogs.fun.kiss",
+    "cogs.games.gamesstats",
     "cogs.games.guess",
     "cogs.games.say",
     "cogs.info.botinfo",
@@ -113,7 +114,6 @@ EXTENSIONS = [
     "cogs.moderation.snipe",
     "cogs.moderation.voicemove",
     "cogs.moderation.ban",
-    "cogs.moderation.mute",
     "cogs.moderation.tempban",
     "cogs.moderation.kick",
     "cogs.premium_main",
@@ -372,90 +372,6 @@ class CharacterBot(commands.Bot):
             logger.info(f"Updated activity to: {activity.name}")
         except Exception as e:
             logger.error(f"Error updating activity: {e}")
-
-    async def setup_hook(self):
-        # load extensions (cogs)
-        self.session = aiohttp.ClientSession()
-        for ext in [
-            # Core utilities
-            "cogs.core.status",
-            "cogs.core.help",
-        
-            # Analytics
-            "cogs.analytics.analytics",
-            #fun
-            "cogs.fun.confession",
-            "cogs.fun.ship",
-            "cogs.fun.kick",
-            "cogs.fun.punch",
-            "cogs.fun.bonk",
-            "cogs.fun.poke",
-            "cogs.fun.pat",
-            "cogs.fun.boop",
-            "cogs.fun.slap",
-            "cogs.fun.blush",
-            "cogs.fun.hug",
-            "cogs.fun.cuddle",
-            "cogs.fun.bite",
-            "cogs.fun.kill",
-            
-            # Games
-            "cogs.games.guess",
-            "cogs.games.say",
-        
-            # Info commands
-            "cogs.info.botinfo",
-            "cogs.info.invite",
-            "cogs.info.serverinfo",
-            "cogs.info.userinfo",
-            "cogs.info.avatar",
-            "cogs.info.randomavatar",
-            "cogs.info.roleinfo",
-            "cogs.info.channelinfo",
-        
-            # Owner commands
-            "cogs.owner.owner",
-            "cogs.owner.premium",
-        
-            # Premium / special features
-            "cogs.premium.vanity",
-
-            # system/special command
-            "cogs.system.guideline_mode",
-            "cogs.system.thread_manager",
-
-            #utility
-            "cogs.utility.afk",
-            "cogs.utility.steal",
-            "cogs.utility.spotifyview",
-
-            # Moderation
-            "cogs.moderation.snipe"
-        ]:
-            try:
-                await self.load_extension(ext)
-                logger.info(f"Loaded extension: {ext}")
-            except Exception as e:
-                logger.error(f"Failed to load {ext}: {e}")
-
-        # IMPORTANT: Sync the app command tree
-        try:
-            # Global sync
-            if bot_config['bot_settings']['auto_sync_commands']:
-                cmds = await self.tree.sync()
-                logger.info(f"App commands synced globally: {len(cmds)}")
-        except Exception as e:
-            logger.error(f"Global sync failed: {e}")
-
-        # Optional: per-guild fast sync during development
-        try:
-            TEST_GUILD_ID = 1087039578931724468
-            if TEST_GUILD_ID:
-                guild = discord.Object(id=TEST_GUILD_ID)
-                cmds = await self.tree.sync(guild=guild)
-                logger.info(f"App commands synced to guild {TEST_GUILD_ID}: {len(cmds)}")
-        except Exception as e:
-            logger.error(f"Guild sync failed: {e}")
 
 bot = CharacterBot()
 

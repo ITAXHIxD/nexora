@@ -22,7 +22,10 @@ PREMIUM:
 
 import asyncio
 import datetime
+import inspect
+import json
 import logging
+import os
 import re
 from typing import Optional
 
@@ -99,13 +102,14 @@ def next_birthday(month, day):
     now = datetime.datetime.now(datetime.timezone.utc)
     try:    c = datetime.datetime(now.year, month, day, tzinfo=datetime.timezone.utc)
     except: c = datetime.datetime(now.year, 3, 1,     tzinfo=datetime.timezone.utc)
-    if c < now:
+    if c.date() < now.date():
         try:    c = datetime.datetime(now.year+1, month, day, tzinfo=datetime.timezone.utc)
         except: c = datetime.datetime(now.year+1, 3, 1,     tzinfo=datetime.timezone.utc)
     return c
 
 def days_until(month, day):
-    return (next_birthday(month, day) - datetime.datetime.now(datetime.timezone.utc)).days
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    return (next_birthday(month, day).date() - today).days
 
 def is_today(month, day):
     n = datetime.datetime.now(datetime.timezone.utc)
@@ -182,6 +186,8 @@ class BirthdayIntro(commands.Cog):
         self.bot  = bot
         self.col  = None
         self.scol = None
+        self.user_store_path = os.path.join("data", "birthday_data.json")
+        self.settings_store_path = os.path.join("data", "birthday_settings.json")
 
     async def cog_load(self):
         if self.bot.mongo_db is not None:
@@ -189,32 +195,116 @@ class BirthdayIntro(commands.Cog):
             self.scol = self.bot.mongo_db["birthday_settings"]
         else:
             logger.warning("%s: mongo_db unavailable", self.__class__.__name__)
-        self.daily_check.start()
+        if self.bot.is_ready():
+            self._ensure_daily_check_running()
         logger.info("%s ready", self.__class__.__name__)
 
     async def cog_unload(self):
-        self.daily_check.cancel()
+        if self.daily_check.is_running():
+            self.daily_check.cancel()
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
-    def is_premium(self, guild_id: int) -> bool:
-        return self.bot.is_premium_guild(guild_id)
+    async def is_premium(self, guild_id: int) -> bool:
+        result = self.bot.is_premium_guild(guild_id)
+        if inspect.isawaitable(result):
+            result = await result
+        return bool(result)
 
     async def get_user(self, uid: int):
-        if self.col is None: return None
-        return await self.col.find_one({"_id": uid})
+        if self.col is not None:
+            return await self.col.find_one({"_id": uid})
+        data = self._load_store(self.user_store_path)
+        return data.get(str(uid))
 
     async def get_settings(self, gid: int):
-        if self.scol is None: return {}
-        return (await self.scol.find_one({"_id": gid})) or {}
+        if self.scol is not None:
+            return (await self.scol.find_one({"_id": gid})) or {}
+        data = self._load_store(self.settings_store_path)
+        return data.get(str(gid), {})
 
     async def upsert_user(self, uid: int, data: dict):
-        if self.col is None: return
-        await self.col.update_one({"_id": uid}, {"$set": data}, upsert=True)
+        if self.col is not None:
+            await self.col.update_one({"_id": uid}, {"$set": data}, upsert=True)
+            return
+        store = self._load_store(self.user_store_path)
+        existing = store.get(str(uid), {})
+        store[str(uid)] = {**existing, **data, "_id": uid}
+        self._save_store(self.user_store_path, store)
 
     async def upsert_settings(self, gid: int, data: dict):
-        if self.scol is None: return
-        await self.scol.update_one({"_id": gid}, {"$set": data}, upsert=True)
+        if self.scol is not None:
+            await self.scol.update_one({"_id": gid}, {"$set": data}, upsert=True)
+            return
+        store = self._load_store(self.settings_store_path)
+        existing = store.get(str(gid), {})
+        store[str(gid)] = {**existing, **data, "_id": gid}
+        self._save_store(self.settings_store_path, store)
+
+    def _ensure_daily_check_running(self):
+        if not self.daily_check.is_running():
+            self.daily_check.start()
+
+    def _load_store(self, path: str) -> dict:
+        if not os.path.exists(path):
+            return {}
+        try:
+            with open(path, "r", encoding="utf-8") as fp:
+                data = json.load(fp)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to read %s: %s", path, exc)
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _save_store(self, path: str, payload: dict):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fp:
+            json.dump(payload, fp, indent=2, ensure_ascii=False)
+
+    def _normalize_birthday_doc(self, doc: dict) -> Optional[dict]:
+        if not isinstance(doc, dict):
+            return None
+
+        try:
+            uid = int(doc["_id"])
+            month = int(doc["month"])
+            day = int(doc["day"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+        try:
+            datetime.date(2000, month, day)
+        except ValueError:
+            return None
+
+        normalized = dict(doc)
+        normalized["_id"] = uid
+        normalized["month"] = month
+        normalized["day"] = day
+        return normalized
+
+    async def iter_birthdays(self, guild_id: Optional[int] = None):
+        if self.col is not None:
+            query = {
+                "month": {"$exists": True, "$ne": None},
+                "day": {"$exists": True, "$ne": None},
+            }
+            if guild_id is not None:
+                query["guild_id"] = guild_id
+            async for doc in self.col.find(query):
+                normalized = self._normalize_birthday_doc(doc)
+                if normalized is not None:
+                    yield normalized
+            return
+
+        data = self._load_store(self.user_store_path)
+        for doc in data.values():
+            normalized = self._normalize_birthday_doc(doc)
+            if normalized is None:
+                continue
+            if guild_id is not None and doc.get("guild_id") != guild_id:
+                continue
+            yield normalized
 
     def parse_intro(self, text: str) -> dict:
         result = {}
@@ -234,12 +324,11 @@ class BirthdayIntro(commands.Cog):
 
     @tasks.loop(time=datetime.time(hour=9, minute=0, tzinfo=datetime.timezone.utc))
     async def daily_check(self):
-        if self.col is None: return
         now = datetime.datetime.now(datetime.timezone.utc)
-        async for doc in self.col.find({"month": {"$exists": True}}):
+        async for doc in self.iter_birthdays():
             if not is_today(doc["month"], doc["day"]): continue
             if doc.get("last_notified_year") == now.year: continue
-            await self.col.update_one({"_id": doc["_id"]}, {"$set": {"last_notified_year": now.year}})
+            await self.upsert_user(doc["_id"], {"last_notified_year": now.year})
 
             guild  = self.bot.get_guild(doc.get("guild_id", 0))
             if not guild: continue
@@ -265,7 +354,12 @@ class BirthdayIntro(commands.Cog):
 
             # Custom wish (premium) or default
             template = doc.get("custom_wish") or f"{PARTY} It's {{mention}}'s birthday today! Wish them well! {CAKE}"
-            desc     = template.format(mention=member.mention, name=display) + age_line + pronoun_line + "\n\n*Click below to send a wish!*"
+            try:
+                rendered = template.format(mention=member.mention, name=display)
+            except (IndexError, KeyError, ValueError) as exc:
+                logger.warning("Invalid custom birthday template for %s: %s", doc["_id"], exc)
+                rendered = f"{PARTY} It's {member.mention}'s birthday today! Wish them well! {CAKE}"
+            desc = rendered + age_line + pronoun_line + "\n\n*Click below to send a wish!*"
 
             embed = discord.Embed(title=f"{CAKE} Happy Birthday, {display}! {CAKE}", description=desc,
                                   color=discord.Color.gold(), timestamp=now)
@@ -276,7 +370,7 @@ class BirthdayIntro(commands.Cog):
             except discord.Forbidden: pass
 
             # Cross-server scope (premium)
-            if doc.get("scope") == "mutual" and self.is_premium(guild.id):
+            if doc.get("scope") == "mutual" and await self.is_premium(guild.id):
                 for og in self.bot.guilds:
                     if og.id == guild.id: continue
                     om = og.get_member(doc["_id"])
@@ -294,6 +388,10 @@ class BirthdayIntro(commands.Cog):
 
     @daily_check.before_loop
     async def _before(self): await self.bot.wait_until_ready()
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        self._ensure_daily_check_running()
 
     async def _drop_role(self, member, role, delay=86400):
         await asyncio.sleep(delay)
@@ -314,7 +412,7 @@ class BirthdayIntro(commands.Cog):
         uid = msg.author.id
 
         # Ambiguous date — DM confirmation (premium only, free gets DD/MM default)
-        if p.get("ambiguous") and p.get("birthday_month") and self.is_premium(msg.guild.id):
+        if p.get("ambiguous") and p.get("birthday_month") and await self.is_premium(msg.guild.id):
             rd, rm, ry = p["raw_d"], p["raw_m"], p.get("birthday_year")
             opt_a, opt_b = (rm, rd, ry), (rd, rm, ry)   # DD/MM, MM/DD
             view = AmbiguousDateView(opt_a=opt_a, opt_b=opt_b)
@@ -361,7 +459,7 @@ class BirthdayIntro(commands.Cog):
 
         if lines:
             note = (f"\n\n{CROWN} *Premium users: use `n!editbirthday` or `/editbirthday` to fix anything!*"
-                    if self.is_premium(msg.guild.id)
+                    if await self.is_premium(msg.guild.id)
                     else f"\n\n*Use `n!setbirthday` to manually correct your birthday if needed.*")
             try:
                 await msg.author.send(embed=discord.Embed(
@@ -380,6 +478,7 @@ class BirthdayIntro(commands.Cog):
         date="Your birthday, e.g. 15/04  |  04/15  |  15-04-2001  |  April 15",
         year="Birth year (optional, only if not included in date)"
     )
+    @commands.guild_only()
     @commands.cooldown(1, 30, commands.BucketType.user)
     async def setbirthday(self, ctx: commands.Context, date: str, year: Optional[int] = None):
         """FREE — Set your birthday. Works as n!setbirthday or /setbirthday."""
@@ -417,7 +516,7 @@ class BirthdayIntro(commands.Cog):
 
         # If date is ambiguous ask right here in the channel (ephemeral)
         if ambiguous:
-            d_val, m_val = int(date.split("/")[0]), int(date.split("/")[1])
+            d_val, m_val = int(m.group(1)), int(m.group(2))
             opt_a = (m_val, d_val, yr)   # DD/MM
             opt_b = (d_val, m_val, yr)   # MM/DD
             view  = AmbiguousDateView(opt_a=opt_a, opt_b=opt_b)
@@ -449,7 +548,7 @@ class BirthdayIntro(commands.Cog):
             ),
             color=discord.Color.green()
         )
-        if self.is_premium(ctx.guild.id):
+        if await self.is_premium(ctx.guild.id):
             embed.set_footer(text=f"{CROWN} Premium: use /editbirthday to change • /birthdaywish for custom message")
         else:
             embed.set_footer(text="Use n!setbirthday again anytime to update")
@@ -457,6 +556,7 @@ class BirthdayIntro(commands.Cog):
 
     @commands.hybrid_command(name="birthday", description="View your or another user's birthday")
     @app_commands.describe(user="User to check (leave blank for yourself)")
+    @commands.guild_only()
     async def birthday(self, ctx: commands.Context, user: Optional[discord.Member] = None):
         """FREE — Check birthday info"""
         target = user or ctx.author
@@ -493,16 +593,27 @@ class BirthdayIntro(commands.Cog):
 
     @commands.hybrid_command(name="birthdaylist", description="View upcoming birthdays in this server")
     @app_commands.describe(limit="How many to show (max 25)")
+    @commands.guild_only()
     async def birthdaylist(self, ctx: commands.Context, limit: int = 10):
         """FREE — List upcoming birthdays"""
-        if self.col is None:
-            return await ctx.send(embed=discord.Embed(description="❌ Database not connected.", color=discord.Color.red()))
-        limit    = max(1, min(limit, 25))
+        limit = 10 if limit is None else max(1, min(int(limit), 25))
         upcoming = []
-        async for doc in self.col.find({"guild_id": ctx.guild.id, "month": {"$exists": True}}):
-            member = ctx.guild.get_member(doc["_id"])
-            if not member: continue
-            upcoming.append((days_until(doc["month"], doc["day"]), member, doc))
+
+        async for doc in self.iter_birthdays(ctx.guild.id):
+            if doc.get("month") is None or doc.get("day") is None:
+                continue
+            
+            member = ctx.guild.get_member(int(doc["_id"]))
+            if member is None:
+                continue
+            
+            try:
+                days = days_until(int(doc["month"]), int(doc["day"]))
+            except Exception as e:
+                logger.error(f"Skipping invalid birthday document {doc}: {e}")
+                continue
+            
+            upcoming.append((days, member, doc))
         upcoming.sort(key=lambda x: x[0])
         if not upcoming:
             return await ctx.send(embed=discord.Embed(
@@ -529,6 +640,7 @@ class BirthdayIntro(commands.Cog):
         announce_channel="Channel for birthday announcements",
         birthday_role="Role to give members on their birthday (optional)"
     )
+    @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
     async def introbdsetup(self, ctx: commands.Context, intro_channel: discord.TextChannel, announce_channel: discord.TextChannel, birthday_role: Optional[discord.Role] = None):
         """FREE (admin) — Set up the birthday system"""
@@ -542,7 +654,7 @@ class BirthdayIntro(commands.Cog):
         embed.add_field(name="📢 Announce Channel", value=announce_channel.mention,                            inline=True)
         embed.add_field(name="🎭 Birthday Role",    value=birthday_role.mention if birthday_role else "None",  inline=True)
         embed.add_field(name="ℹ️ Auto-parsed",      value="Name • Birthday • Age • Pronouns",                  inline=False)
-        tier = f"{CROWN} Premium active" if self.is_premium(ctx.guild.id) else f"{LOCK} Free tier"
+        tier = f"{CROWN} Premium active" if await self.is_premium(ctx.guild.id) else f"{LOCK} Free tier"
         embed.add_field(name="💎 Tier", value=tier, inline=False)
         await ctx.send(embed=embed)
 
@@ -552,9 +664,10 @@ class BirthdayIntro(commands.Cog):
 
     @commands.hybrid_command(name="editbirthday", description=f"{CROWN} Premium — Fix your birthday date")
     @app_commands.describe(month="Month (1-12)", day="Day (1-31)", year="Year (optional)")
+    @commands.guild_only()
     async def editbirthday(self, ctx: commands.Context, month: int, day: int, year: Optional[int] = None):
         """PREMIUM — Correct your birthday date"""
-        if not self.is_premium(ctx.guild.id):
+        if not await self.is_premium(ctx.guild.id):
             return await ctx.send(embed=premium_embed(), ephemeral=True)
         if not (1 <= month <= 12):
             return await ctx.send(embed=discord.Embed(description="❌ Month must be 1–12.", color=discord.Color.red()), ephemeral=True)
@@ -571,9 +684,10 @@ class BirthdayIntro(commands.Cog):
 
     @commands.hybrid_command(name="editprofile", description=f"{CROWN} Premium — Update name, age, or pronouns")
     @app_commands.describe(name="Your display name", age="Your age", pronouns="Your pronouns (e.g. she/her)")
+    @commands.guild_only()
     async def editprofile(self, ctx: commands.Context, name: Optional[str] = None, age: Optional[int] = None, pronouns: Optional[str] = None):
         """PREMIUM — Update your intro profile fields"""
-        if not self.is_premium(ctx.guild.id):
+        if not await self.is_premium(ctx.guild.id):
             return await ctx.send(embed=premium_embed(), ephemeral=True)
         if not any([name, age, pronouns]):
             return await ctx.send(embed=discord.Embed(description="❌ Provide at least one field.", color=discord.Color.red()), ephemeral=True)
@@ -586,9 +700,10 @@ class BirthdayIntro(commands.Cog):
         await ctx.send(embed=discord.Embed(title="✅ Profile Updated", description="\n".join(lines), color=discord.Color.green()), ephemeral=True)
 
     @commands.hybrid_command(name="myprofile", description=f"{CROWN} Premium — View your full birthday profile")
+    @commands.guild_only()
     async def myprofile(self, ctx: commands.Context):
         """PREMIUM — View everything the bot has stored for you"""
-        if not self.is_premium(ctx.guild.id):
+        if not await self.is_premium(ctx.guild.id):
             return await ctx.send(embed=premium_embed(), ephemeral=True)
         data = await self.get_user(ctx.author.id)
         if not data:
@@ -617,14 +732,21 @@ class BirthdayIntro(commands.Cog):
 
     @commands.hybrid_command(name="birthdaywish", description=f"{CROWN} Premium — Set a custom birthday announcement message")
     @app_commands.describe(message="Your message. Use {mention} for your ping, {name} for display name")
+    @commands.guild_only()
     async def birthdaywish(self, ctx: commands.Context, *, message: str):
         """PREMIUM — Customize the message shown on your birthday announcement"""
-        if not self.is_premium(ctx.guild.id):
+        if not await self.is_premium(ctx.guild.id):
             return await ctx.send(embed=premium_embed(), ephemeral=True)
         if len(message) > 200:
             return await ctx.send(embed=discord.Embed(description="❌ Max 200 characters.", color=discord.Color.red()), ephemeral=True)
+        try:
+            preview = message.format(mention=ctx.author.mention, name=ctx.author.display_name)
+        except (IndexError, KeyError, ValueError):
+            return await ctx.send(embed=discord.Embed(
+                description="❌ Use only `{mention}` and `{name}` placeholders in birthday wishes.",
+                color=discord.Color.red()
+            ), ephemeral=True)
         await self.upsert_user(ctx.author.id, {"custom_wish": message, "guild_id": ctx.guild.id})
-        preview = message.format(mention=ctx.author.mention, name=ctx.author.display_name)
         await ctx.send(embed=discord.Embed(
             title=f"{SPARKLE} Custom Wish Saved!",
             description=f"**Preview:**\n{preview}",
@@ -637,9 +759,10 @@ class BirthdayIntro(commands.Cog):
         app_commands.Choice(name="This server only", value="server"),
         app_commands.Choice(name="All mutual servers", value="mutual"),
     ])
+    @commands.guild_only()
     async def birthdayscope(self, ctx: commands.Context, scope: str):
         """PREMIUM — Control where your birthday announcement gets sent"""
-        if not self.is_premium(ctx.guild.id):
+        if not await self.is_premium(ctx.guild.id):
             return await ctx.send(embed=premium_embed(), ephemeral=True)
         await self.upsert_user(ctx.author.id, {"scope": scope, "guild_id": ctx.guild.id})
         label = "all mutual servers" if scope == "mutual" else "this server only"
@@ -654,9 +777,10 @@ class BirthdayIntro(commands.Cog):
 
     @commands.hybrid_command(name="birthdaynotify", description=f"{CROWN} Premium — Toggle birthday DM notifications")
     @app_commands.describe(enabled="True = receive DMs when someone wishes you, False = no DMs")
+    @commands.guild_only()
     async def birthdaynotify(self, ctx: commands.Context, enabled: bool):
         """PREMIUM — Control whether you get DMs when people wish you"""
-        if not self.is_premium(ctx.guild.id):
+        if not await self.is_premium(ctx.guild.id):
             return await ctx.send(embed=premium_embed(), ephemeral=True)
         await self.upsert_user(ctx.author.id, {"dm_notifications": enabled, "guild_id": ctx.guild.id})
         await ctx.send(embed=discord.Embed(
@@ -666,10 +790,11 @@ class BirthdayIntro(commands.Cog):
 
     @commands.hybrid_command(name="scanintros", description=f"{CROWN} Premium (admin) — Scan past intro messages")
     @app_commands.describe(limit="Messages to scan (max 200, default 100)")
+    @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
     async def scanintros(self, ctx: commands.Context, limit: int = 100):
         """PREMIUM (admin) — Retroactively import data from old intro messages"""
-        if not self.is_premium(ctx.guild.id):
+        if not await self.is_premium(ctx.guild.id):
             return await ctx.send(embed=premium_embed(), ephemeral=True)
         s = await self.get_settings(ctx.guild.id)
         if not s.get("intro_channel_id"):
