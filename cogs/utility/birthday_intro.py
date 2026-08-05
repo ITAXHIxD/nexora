@@ -540,19 +540,17 @@ class BirthdayIntro(commands.Cog):
         })
 
         d_left = days_until(month, day)
-        embed  = discord.Embed(
+        status = "🎉 That's today!" if d_left == 0 else f"Coming up in **{d_left}** days!"
+
+        embed = discord.Embed(
             title=f"{CAKE} Birthday Set!",
             description=(
-                f"**{month_name(month)} {day}**" + (f", {yr}" if yr else "") +
-                f"\n{'🎉 That\'s today!' if d_left == 0 else f'Coming up in **{d_left}** days!'}"
+                f"**{month_name(month)} {day}**"
+                + (f", {yr}" if yr else "")
+                + f"\n{status}"
             ),
             color=discord.Color.green()
         )
-        if await self.is_premium(ctx.guild.id):
-            embed.set_footer(text=f"{CROWN} Premium: use /editbirthday to change • /birthdaywish for custom message")
-        else:
-            embed.set_footer(text="Use n!setbirthday again anytime to update")
-        await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="birthday", description="View your or another user's birthday")
     @app_commands.describe(user="User to check (leave blank for yourself)")
