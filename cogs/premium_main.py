@@ -34,6 +34,14 @@ from discord.ext import commands
 
 logger = logging.getLogger(__name__)
 
+UNSAFE_VANITY_WEBHOOK_FIELDS = (
+    "log_webhook",
+    "webhook",
+    "webhook_url",
+    "discord_webhook",
+    "discord_webhook_url",
+)
+
 # ══════════════════════════════════════════════════════════════════
 # TIER CONFIG  — matches your premium_config.json exactly
 # ══════════════════════════════════════════════════════════════════
@@ -248,6 +256,27 @@ def _feature_row(key: str, value) -> str:
     return f"✅ {label}: {value}"
 
 
+class PremiumActionsView(discord.ui.View):
+    """Small, non-intrusive navigation for premium information cards."""
+
+    def __init__(self, timeout=180):
+        super().__init__(timeout=timeout)
+
+    @discord.ui.button(label="View Plans", style=discord.ButtonStyle.secondary, emoji="💎")
+    async def view_plans(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Use `/premium_price` to compare plans and see what each tier adds.",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="What Stays Free?", style=discord.ButtonStyle.secondary, emoji="🆓")
+    async def free_features(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Core commands remain free. Premium is for optional scale, automation, and customization.",
+            ephemeral=True,
+        )
+
+
 # ══════════════════════════════════════════════════════════════════
 # COG
 # ══════════════════════════════════════════════════════════════════
@@ -262,6 +291,7 @@ class Premium(commands.Cog):
         if db is not None:
             self.col = db["premium"]
             logger.info("Premium: MongoDB connected")
+            await self._scrub_unsafe_webhook_fields()
         else:
             logger.warning("Premium: mongo_db unavailable")
 
@@ -280,6 +310,31 @@ class Premium(commands.Cog):
         self.bot.is_premium_guild = _is_premium
         self.bot.get_premium_tier = _get_tier
         self.bot.get_tier_config  = _tier_config
+
+    async def _scrub_unsafe_webhook_fields(self):
+        if self.col is None:
+            return
+
+        unset_fields = {
+            f"vanity_settings.{field}": ""
+            for field in UNSAFE_VANITY_WEBHOOK_FIELDS
+        }
+        filter_query = {
+            "$or": [
+                {f"vanity_settings.{field}": {"$exists": True}}
+                for field in UNSAFE_VANITY_WEBHOOK_FIELDS
+            ]
+        }
+
+        try:
+            result = await self.col.update_many(filter_query, {"$unset": unset_fields})
+            if result.modified_count:
+                logger.warning(
+                    "Premium: removed webhook URLs from %d MongoDB document(s)",
+                    result.modified_count,
+                )
+        except Exception as e:
+            logger.error("Premium: failed to scrub MongoDB webhook fields: %s", e)
 
     # ── DB helpers ─────────────────────────────────────────────────────────────
 
@@ -343,7 +398,7 @@ class Premium(commands.Cog):
 
         # ── Main status row ────────────────────────────────────────────────────
         embed.add_field(name="📦 Tier",    value=cfg["display_name"], inline=True)
-        embed.add_field(name="✅ Active",  value="Yes" if is_prem else "No — [upgrade](#)", inline=True)
+        embed.add_field(name="✅ Active", value="Yes" if is_prem else "No · Free tier", inline=True)
         embed.add_field(name="🎭 Vanity",  value=_vanity_slots(tier) + " slots", inline=True)
 
         # ── Subscription details ───────────────────────────────────────────────
@@ -381,14 +436,14 @@ class Premium(commands.Cog):
             embed.add_field(
                 name="🚀 Upgrade",
                 value=(
-                    f"Contact <@{OWNER_ID}> with your server ID and desired tier.\n"
-                    f"Use `n!premium_price` to see all plans."
+                    "Premium is optional and core commands stay available on the free tier.\n"
+                    f"Use `/premium_price` to compare plans, or contact <@{OWNER_ID}> when ready."
                 ),
                 inline=False,
             )
 
         embed.set_footer(text="Nexora Premium  ·  Contact owner to subscribe")
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, view=PremiumActionsView())
 
     # ── n!set_premium (owner only) ────────────────────────────────────────────
 
@@ -547,7 +602,7 @@ class Premium(commands.Cog):
         )
 
         embed.set_footer(text=f"Contact @{OWNER_ID} via Discord DM  ·  Payment: UPI")
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, view=PremiumActionsView())
 
     # ── n!vanity ───────────────────────────────────────────────────────────────
 

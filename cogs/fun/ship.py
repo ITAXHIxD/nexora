@@ -4,10 +4,11 @@ cogs/fun/ship.py
 Enhanced ship command with:
   • Cinematic gradient ship card image
   • Animated-style glow rings, particle stars, shimmer bar
-  • Rich embed with tier badges, ship name, fun facts
-  • 🔁 Re-roll and ❤️ Reaction buttons
+  • Modern Discord Components V2 ship card
+  • ❤️ Reaction, 💬 score breakdown, and 🔗 share actions
   • Ships members, plain text names, or "random"
   • Consistent (hash-based) results per pair
+  • 🔄 Temporary re-roll button — unlimited percentage-only rerolls
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
@@ -18,14 +19,27 @@ import math
 import os
 import random
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 import aiohttp
 import discord
 from discord import app_commands
+
+# Ship UI uses Discord Components V2.
+try:
+    _DPT = tuple(discord.version_info[:3])
+except Exception:
+    _DPT = tuple(int(x) for x in discord.__version__.split(".")[:3])
+
+if _DPT < (2, 7, 1):
+    raise RuntimeError(
+        f"ship.py requires discord.py >= 2.7.1 for the Components V2 UI; "
+        f"detected {discord.__version__}. Upgrade with: "
+        f"python -m pip install -U discord.py"
+    )
 from discord.ext import commands
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +80,20 @@ HYPE = [
     "The tension is palpable from here.",
     "Bestie-to-lovers arc loading…",
     "The main characters of this server. Obviously.",
+]
+
+# ── Duo challenge pool ────────────────────────────────────────────────────────
+DUO_CHALLENGES = [
+    ("⚡ Sync Check", "Both send the same emoji at the same time."),
+    ("🎯 Quick Draw", "Both name a food you would eat right now. No copying."),
+    ("🧠 Mind Match", "Count down from 3 and both say a number from 1–10. Same number = success."),
+    ("😂 No Laugh", "Send a meme or joke. First person to laugh loses."),
+    ("🔤 Letter Lock", "Pick a letter. For 30 seconds, neither person can use a word starting with it."),
+    ("🎨 Same Vibe", "Both choose a colour that matches the current vibe. Reveal together."),
+    ("🎵 Song Swap", "Each pick one song that fits the other person. Reveal at the same time."),
+    ("🤝 Compliment Battle", "Take turns giving genuine compliments. First person to run out loses."),
+    ("🕵️ Two Truths", "Each give one true statement and one fake one. The other has to guess."),
+    ("⏱️ Speed Round", "You each get 10 seconds to answer the same random question."),
 ]
 
 # ── Colour helpers ─────────────────────────────────────────────────────────────
@@ -320,52 +348,329 @@ async def build_ship_image(
     buf.seek(0)
     return buf
 
-# ── View ───────────────────────────────────────────────────────────────────────
+# ── Modern Components V2 View ────────────────────────────────────────────────
 
-class ShipView(discord.ui.View):
-    def __init__(self, cog, ctx, member1, member2, name1, name2, id1, id2):
-        super().__init__(timeout=120)
-        self.cog     = cog
-        self.ctx     = ctx
+class ShipView(discord.ui.LayoutView):
+    """Modern Components V2 interaction surface for a ship result.
+
+    The normal result is deterministic for the pair. A reroll temporarily
+    randomizes only the percentage while keeping the same two people.
+    """
+
+    def __init__(
+        self,
+        cog,
+        ctx,
+        member1,
+        member2,
+        name1,
+        name2,
+        id1,
+        id2,
+        pct,
+        *,
+        original_pct=None,
+        is_rerolled=False,
+    ):
+        super().__init__(timeout=180)
+        self.cog = cog
+        self.ctx = ctx
         self.member1 = member1
         self.member2 = member2
-        self.name1   = name1
-        self.name2   = name2
-        self.id1     = id1
-        self.id2     = id2
-        self.reacts  = set()
+        self.name1 = name1
+        self.name2 = name2
+        self.id1 = id1
+        self.id2 = id2
 
-    @discord.ui.button(emoji="🔁", label="Re-roll", style=discord.ButtonStyle.grey)
-    async def reroll(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()
-        # Randomise by adding a salt so each roll differs
-        salt = str(random.randint(0, 999999))
-        pct  = self.cog.calc_pct(self.id1 + salt, self.id2 + salt)
-        embed, file = await self.cog.build_output(
-            self.ctx, self.name1, self.name2, pct,
-            self.member1, self.member2, rerolled=True
+        self.pct = pct
+        self.is_rerolled = is_rerolled
+
+        self.reacts = set()
+        self.message = None
+        self._fact = cog.fun_fact(pct)
+        self._build()
+
+    def _build(self):
+        # Rebuild the V2 layout so reroll can replace the entire card cleanly.
+        self.clear_items()
+
+        self.container = discord.ui.Container()
+        self.container.add_item(
+            discord.ui.TextDisplay(
+                f"# 💘 {discord.utils.escape_markdown(self.name1)} × "
+                f"{discord.utils.escape_markdown(self.name2)}"
+            )
         )
-        await interaction.edit_original_response(embed=embed, attachments=[file], view=self)
+        self.container.add_item(
+            discord.ui.MediaGallery(
+                discord.MediaGalleryItem(
+                    "attachment://ship.png",
+                    description=f"Compatibility card for {self.name1} and {self.name2}",
+                )
+            )
+        )
 
-    @discord.ui.button(emoji="❤️", label="React", style=discord.ButtonStyle.red)
-    async def react(self, interaction: discord.Interaction, button: discord.ui.Button):
+        tier_label, _, _, tier_desc = get_tier(self.pct)
+        sname = self.cog.ship_name(self.name1, self.name2)
+
+        status = " 🔄 **Temporary reroll**" if self.is_rerolled else ""
+        note = (
+            "-# 🔄 Temporary reroll — same two people, percentage only. Run `/ship` again for the original result."
+            if self.is_rerolled
+            else
+            "-# 🔒 Original result is deterministic for this pair."
+        )
+
+        self.result_text = discord.ui.TextDisplay(
+            f"## {tier_label} · **{self.pct}%**{status}\n"
+            f"**Ship name:** `{discord.utils.escape_markdown(sname)}`\n"
+            f"> {discord.utils.escape_markdown(tier_desc)}\n\n"
+            f"✨ *{discord.utils.escape_markdown(self._fact)}*"
+        )
+
+        self.container.add_item(self.result_text)
+        self.container.add_item(discord.ui.TextDisplay("━━━━━━━━━━━━━━━━━━━━━━━━"))
+
+        self.reaction_button = discord.ui.Button(
+            label=f"React · {len(self.reacts)}",
+            emoji="❤️",
+            style=discord.ButtonStyle.danger,
+        )
+        self.why_button = discord.ui.Button(
+            label="Why this score?",
+            emoji="💬",
+            style=discord.ButtonStyle.secondary,
+        )
+        self.reroll_button = discord.ui.Button(
+            label="Reroll",
+            emoji="🔄",
+            style=discord.ButtonStyle.primary,
+        )
+        self.share_button = discord.ui.Button(
+            label="Share",
+            emoji="🔗",
+            style=discord.ButtonStyle.secondary,
+        )
+
+        self.reaction_button.callback = self._react
+        self.why_button.callback = self._why
+        self.reroll_button.callback = self._reroll
+        self.share_button.callback = self._share
+
+        self.actions = discord.ui.ActionRow(
+            self.reaction_button,
+            self.why_button,
+            self.reroll_button,
+            self.share_button,
+        )
+        self.container.add_item(self.actions)
+        self.container.add_item(discord.ui.TextDisplay(note))
+
+        self.add_item(self.container)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # Public result: everyone in the channel may use the buttons.
+        return True
+
+    async def _react(self, interaction: discord.Interaction):
+        if interaction.user.id in self.reacts:
+            return await interaction.response.send_message(
+                "❤️ You already reacted to this ship!",
+                ephemeral=True,
+            )
+
         self.reacts.add(interaction.user.id)
-        button.label = f"❤️ {len(self.reacts)}"
+        self.reaction_button.label = f"React · {len(self.reacts)}"
         await interaction.response.edit_message(view=self)
 
-    @discord.ui.button(emoji="🔗", label="Share", style=discord.ButtonStyle.blurple)
-    async def share(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            f"💘 **{self.name1} × {self.name2}** have been shipped!\n"
-            f"Use `/ship {self.name1} {self.name2}` to see the result!",
-            ephemeral=False
+    async def _why(self, interaction: discord.Interaction):
+        tier_label, _, _, tier_desc = get_tier(self.pct)
+
+        score_bands = (
+            "💗 **Chemistry:** absolutely cooking"
+            if self.pct >= 70 else
+            "✨ **Chemistry:** there is something here"
+            if self.pct >= 45 else
+            "🌱 **Chemistry:** potential exists, somehow"
+            if self.pct >= 25 else
+            "💀 **Chemistry:** the algorithm has concerns"
         )
+        balance = (
+            "🌟 High-synergy pairing"
+            if self.pct >= 85 else
+            "💫 Strong pairing"
+            if self.pct >= 70 else
+            "🫶 Mixed signals"
+            if self.pct >= 45 else
+            "🧊 Low compatibility"
+        )
+
+        reroll_note = (
+            "-# 🔄 Temporary reroll — same two people, randomized percentage. Run `/ship` again for the original result."
+            if self.is_rerolled else ""
+        )
+
+        await interaction.response.send_message(
+            (
+                f"## 💬 Why {self.pct}%?\n"
+                f"**{discord.utils.escape_markdown(self.name1)} × "
+                f"{discord.utils.escape_markdown(self.name2)}**\n\n"
+                f"{score_bands}\n"
+                f"{balance}\n"
+                f"🏷️ **Tier:** {tier_label}\n\n"
+                f"> {discord.utils.escape_markdown(tier_desc)}\n\n"
+                f"-# The percentage is fun-score, not a real compatibility measurement."
+                f"{reroll_note}"
+            ),
+            ephemeral=True,
+        )
+
+
+    async def _reroll(self, interaction: discord.Interaction):
+        # Keep the exact same two people. Only randomize the percentage.
+        await interaction.response.defer()
+
+        self.pct = random.randint(0, 100)
+        self._fact = self.cog.fun_fact(self.pct)
+        self.is_rerolled = True
+
+        _, col_a, col_b, tier_desc = get_tier(self.pct)
+
+        img_buf = await build_ship_image(
+            self.name1,
+            self.name2,
+            self.pct,
+            col_a,
+            col_b,
+            self.member1,
+            self.member2,
+        )
+        file = discord.File(img_buf, filename="ship.png")
+
+        # Update only the score text. Do not rebuild the view.
+        self.result_text.content = (
+            f"## {get_tier(self.pct)[0]} · **{self.pct}%** 🔄 **Temporary reroll**\n"
+            f"**Ship name:** `{discord.utils.escape_markdown(self.cog.ship_name(self.name1, self.name2))}`\n"
+            f"> {discord.utils.escape_markdown(tier_desc)}\n\n"
+            f"✨ *{discord.utils.escape_markdown(self._fact)}*"
+        )
+
+        await interaction.edit_original_response(
+            attachments=[file],
+            view=self,
+        )
+
+    async def _share(self, interaction: discord.Interaction):
+        temp_note = " · 🔄 temporary reroll" if self.is_rerolled else ""
+        await interaction.response.send_message(
+            (
+                f"💘 **{discord.utils.escape_markdown(self.name1)} × "
+                f"{discord.utils.escape_markdown(self.name2)}**\n"
+                f"**{self.pct}%** · {get_tier(self.pct)[0]}{temp_note}\n"
+                f"Ship name: **{discord.utils.escape_markdown(self.cog.ship_name(self.name1, self.name2))}**\n"
+                f"🔗 Run `/ship {discord.utils.escape_markdown(self.name1)} {discord.utils.escape_markdown(self.name2)}` to view the original result."
+            ),
+            ephemeral=False,
+        )
+
+    async def on_timeout(self):
+        for item in self.walk_children():
+            if hasattr(item, "disabled"):
+                item.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except (discord.NotFound, discord.HTTPException):
+                pass
+
 
 # ── Cog ────────────────────────────────────────────────────────────────────────
 
 class Ship(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+        # Reuse the MongoDB connection created by bot.py.
+        # bot.py connects before loading this cog and exposes the database
+        # through bot.mongo_db.
+        self.db = getattr(bot, "mongo_db", None)
+        self.ship_pairs = self.db["ship_pairs"] if self.db is not None else None
+        self.ship_users = self.db["ship_users"] if self.db is not None else None
+
+    async def _record_ship(self, guild_id: Optional[int], id1: str, id2: str,
+                           name1: str, name2: str, pct: int, author_id: int):
+        """Persist the permanent pair score and the command user's daily streak."""
+        if self.db is None or guild_id is None:
+            return
+
+        gid = str(guild_id)
+        a, b = sorted([str(id1), str(id2)])
+        pair_key = f"{a}:{b}"
+        now = datetime.now(timezone.utc)
+        today = now.date().isoformat()
+
+        await self.ship_pairs.update_one(
+            {"guild_id": gid, "pair_key": pair_key},
+            {
+                "$set": {
+                    "guild_id": gid,
+                    "pair_key": pair_key,
+                    "id1": a,
+                    "id2": b,
+                    "name1": name1 if str(id1) == a else name2,
+                    "name2": name2 if str(id2) == b else name1,
+                    "score": pct,
+                    "last_shipped": now,
+                },
+                "$inc": {"times_shipped": 1},
+            },
+            upsert=True,
+        )
+
+        user_key = {"guild_id": gid, "user_id": str(author_id)}
+        user = await self.ship_users.find_one(user_key)
+        if not user:
+            await self.ship_users.insert_one({
+                **user_key,
+                "current_streak": 1,
+                "longest_streak": 1,
+                "last_date": today,
+                "total_ships": 1,
+            })
+            return
+
+        last_date = user.get("last_date")
+        current = int(user.get("current_streak", 0))
+        longest = int(user.get("longest_streak", current))
+        total = int(user.get("total_ships", 0)) + 1
+
+        if last_date == today:
+            # Multiple ships on the same day do not inflate the streak.
+            await self.ship_users.update_one(
+                user_key,
+                {"$set": {"total_ships": total}},
+            )
+        else:
+            try:
+                last = datetime.fromisoformat(str(last_date)).date()
+                day_gap = (now.date() - last).days
+            except Exception:
+                day_gap = 999
+
+            current = current + 1 if day_gap == 1 else 1
+            longest = max(longest, current)
+            await self.ship_users.update_one(
+                user_key,
+                {"$set": {
+                    "current_streak": current,
+                    "longest_streak": longest,
+                    "last_date": today,
+                    "total_ships": total,
+                }},
+            )
+
+    def _mongo_required(self):
+        return self.db is not None and self.ship_pairs is not None and self.ship_users is not None
 
     def calc_pct(self, id1: str, id2: str) -> int:
         a, b = sorted([str(id1), str(id2)])
@@ -405,33 +710,30 @@ class Ship(commands.Cog):
         pool = [m for m in ctx.guild.members if not m.bot and m != exclude]
         return random.choice(pool) if pool else None
 
-    async def build_output(self, ctx, name1, name2, pct, m1, m2, rerolled=False):
+    async def build_output(self, ctx, name1, name2, pct, m1, m2):
         tier_label, col_a, col_b, tier_desc = get_tier(pct)
         sname = self.ship_name(name1, name2)
-        fact  = self.fun_fact(pct)
+        fact = self.fun_fact(pct)
 
         img_buf = await build_ship_image(name1, name2, pct, col_a, col_b, m1, m2)
-        file    = discord.File(img_buf, filename="ship.png")
+        file = discord.File(img_buf, filename="ship.png")
 
-        embed = discord.Embed(
-            title=f"💘 {name1}  ×  {name2}",
-            color=discord.Color.from_rgb(*lerp_color(col_a, col_b, 0.5)),
-            timestamp=datetime.now()
+        return {
+            "tier_label": tier_label,
+            "tier_desc": tier_desc,
+            "ship_name": sname,
+            "fact": fact,
+            "file": file,
+        }
+
+    async def build_error_view(self, title: str, description: str):
+        view = discord.ui.LayoutView(timeout=60)
+        view.add_item(
+            discord.ui.Container(
+                discord.ui.TextDisplay(f"# ❌ {title}\n\n{description}")
+            )
         )
-        embed.set_image(url="attachment://ship.png")
-
-        embed.add_field(name="💫 Ship Name",    value=f"**{sname}**",    inline=True)
-        embed.add_field(name="📊 Compatibility", value=f"**{pct}%**",    inline=True)
-        embed.add_field(name="🏷️ Tier",         value=tier_label,        inline=True)
-        embed.add_field(name="✨ Verdict",       value=tier_desc,         inline=False)
-        embed.add_field(name="🎲 Fun Fact",      value=f"*{fact}*",       inline=False)
-
-        if rerolled:
-            embed.set_footer(text=f"Re-rolled by {ctx.author.display_name} • Results may vary", icon_url=ctx.author.display_avatar.url)
-        else:
-            embed.set_footer(text=f"Shipped by {ctx.author.display_name} • Results are definitive", icon_url=ctx.author.display_avatar.url)
-
-        return embed, file
+        return view
 
     @commands.hybrid_command(name="ship", description="Ship two people and see their love compatibility 💘")
     @app_commands.describe(
@@ -476,17 +778,183 @@ class Ship(commands.Cog):
 
         # Safety
         if (m1 and m1.bot) or (m2 and m2.bot):
-            return await ctx.send(embed=discord.Embed(description="❌ Can't ship bots!", color=discord.Color.red()), ephemeral=True)
+            error_view = await self.build_error_view(
+                "Can't ship bots",
+                "Pick human members for the ship result. 🤖💔",
+            )
+            return await ctx.send(view=error_view, ephemeral=True)
 
         name1 = n1 or (m1.display_name if m1 else "Unknown")
         name2 = n2 or (m2.display_name if m2 else "Unknown")
         id1   = str(m1.id) if m1 else name1
         id2   = str(m2.id) if m2 else name2
 
-        pct   = self.calc_pct(id1, id2)
-        embed, file = await self.build_output(ctx, name1, name2, pct, m1, m2)
-        view  = ShipView(self, ctx, m1, m2, name1, name2, id1, id2)
-        msg   = await ctx.send(embed=embed, file=file, view=view)
+        pct = self.calc_pct(id1, id2)
+        await self._record_ship(
+            getattr(ctx.guild, "id", None),
+            id1, id2, name1, name2, pct, getattr(ctx.author, "id", 0),
+        )
+        output = await self.build_output(ctx, name1, name2, pct, m1, m2)
+        view = ShipView(
+            self,
+            ctx,
+            m1,
+            m2,
+            name1,
+            name2,
+            id1,
+            id2,
+            pct,
+            is_rerolled=False,
+        )
+        msg = await ctx.send(file=output["file"], view=view)
+        view.message = msg
+
+    @commands.hybrid_command(
+        name="shipleaderboard",
+        description="Show the highest-scoring ships in this server 🏆",
+    )
+    @app_commands.describe(limit="How many ships to show (1–10)")
+    async def shipleaderboard(self, ctx: commands.Context, limit: Optional[int] = 10):
+        if not self._mongo_required():
+            return await ctx.send(
+                "⚠️ Ship leaderboard needs MongoDB. Check the bot MongoDB connection in `bot.py`.",
+                ephemeral=True,
+            )
+
+        limit = max(1, min(int(limit or 10), 10))
+        cursor = self.ship_pairs.find({"guild_id": str(ctx.guild.id) if ctx.guild else ""}).sort(
+            [("score", -1), ("times_shipped", -1)]
+        ).limit(limit)
+        rows = await cursor.to_list(length=limit)
+
+        view = discord.ui.LayoutView(timeout=60)
+        container = discord.ui.Container()
+        container.add_item(discord.ui.TextDisplay("# 🏆 Ship Leaderboard"))
+
+        if not rows:
+            container.add_item(discord.ui.TextDisplay(
+                "No ship stats yet. Run `/ship` to start the leaderboard!"
+            ))
+        else:
+            lines = []
+            medals = ["🥇", "🥈", "🥉"]
+            for i, row in enumerate(rows, 1):
+                medal = medals[i - 1] if i <= 3 else f"**{i}.**"
+                lines.append(
+                    f"{medal} **{discord.utils.escape_markdown(str(row.get('name1', 'Unknown')))} × "
+                    f"{discord.utils.escape_markdown(str(row.get('name2', 'Unknown')))}** — "
+                    f"**{int(row.get('score', 0))}%** · {int(row.get('times_shipped', 0))} ships"
+                )
+            container.add_item(discord.ui.TextDisplay("\n".join(lines)))
+            container.add_item(discord.ui.TextDisplay(
+                "-# Scores are the permanent `/ship` results. Rerolls are temporary and do not change the leaderboard."
+            ))
+
+        view.add_item(container)
+        await ctx.send(view=view)
+
+    @commands.hybrid_command(
+        name="shipstreak",
+        description="Show a user's daily ship streak 🔥",
+    )
+    @app_commands.describe(user="User to check (leave blank = you)")
+    async def shipstreak(self, ctx: commands.Context, user: Optional[str] = None):
+        if not self._mongo_required():
+            return await ctx.send(
+                "⚠️ Ship streak needs MongoDB. Check the bot MongoDB connection in `bot.py`.",
+                ephemeral=True,
+            )
+
+        member, name = self._resolve(ctx, user)
+        target = member if member else ctx.author
+        display = target.display_name if member else (name or ctx.author.display_name)
+
+        row = await self.ship_users.find_one({
+            "guild_id": str(ctx.guild.id) if ctx.guild else "",
+            "user_id": str(target.id),
+        })
+
+        current = int(row.get("current_streak", 0)) if row else 0
+        longest = int(row.get("longest_streak", 0)) if row else 0
+        total = int(row.get("total_ships", 0)) if row else 0
+
+        view = discord.ui.LayoutView(timeout=60)
+        view.add_item(discord.ui.Container(
+            discord.ui.TextDisplay(
+                f"# 🔥 {discord.utils.escape_markdown(display)}'s Ship Streak\n\n"
+                f"**Current:** {current} day{'s' if current != 1 else ''}\n"
+                f"**Best:** {longest} day{'s' if longest != 1 else ''}\n"
+                f"**Total ships:** {total}"
+            )
+        ))
+        await ctx.send(view=view)
+
+    @commands.hybrid_command(
+        name="duochallenge",
+        description="Give any two people a fun relationship-neutral challenge 🎯",
+    )
+    @app_commands.describe(
+        user1="First person — mention, name, or text (leave blank = you)",
+        user2="Second person — mention, name, or 'random'",
+    )
+    async def duochallenge(
+        self,
+        ctx: commands.Context,
+        user1: Optional[str] = None,
+        user2: Optional[str] = None,
+    ):
+        m1, n1 = self._resolve(ctx, user1)
+        m2, n2 = self._resolve(ctx, user2)
+
+        # Same friendly resolution rules as /ship, but this feature is explicitly
+        # relationship-neutral: friends, siblings, partners, teammates, etc.
+        if user1 is None and user2 is None:
+            m1, n1 = ctx.author, ctx.author.display_name
+            rnd = self._random_member(ctx, exclude=ctx.author)
+            m2, n2 = (rnd, rnd.display_name) if rnd else (ctx.author, ctx.author.display_name)
+        elif user2 is None:
+            if n1 == "random":
+                m1, n1 = ctx.author, ctx.author.display_name
+                rnd = self._random_member(ctx, exclude=ctx.author)
+                m2, n2 = (rnd, rnd.display_name) if rnd else (ctx.author, ctx.author.display_name)
+            elif m1:
+                m2, n2 = m1, n1
+                m1, n1 = ctx.author, ctx.author.display_name
+            else:
+                m2, n2 = None, n1
+                m1, n1 = ctx.author, ctx.author.display_name
+        else:
+            if n1 == "random" and m1 is None:
+                rnd = self._random_member(ctx)
+                m1, n1 = (rnd, rnd.display_name) if rnd else (ctx.author, ctx.author.display_name)
+            if n2 == "random" and m2 is None:
+                rnd = self._random_member(ctx, exclude=m1)
+                m2, n2 = (rnd, rnd.display_name) if rnd else (ctx.author, ctx.author.display_name)
+
+        if (m1 and m1.bot) or (m2 and m2.bot):
+            view = await self.build_error_view(
+                "Can't challenge bots",
+                "Pick human members for the challenge. 🤖❌",
+            )
+            return await ctx.send(view=view, ephemeral=True)
+
+        name1 = n1 or (m1.display_name if m1 else "Unknown")
+        name2 = n2 or (m2.display_name if m2 else "Unknown")
+        title, challenge = random.choice(DUO_CHALLENGES)
+
+        view = discord.ui.LayoutView(timeout=120)
+        container = discord.ui.Container()
+        container.add_item(discord.ui.TextDisplay(
+            f"# 🎯 Duo Challenge\n"
+            f"## {discord.utils.escape_markdown(name1)} × {discord.utils.escape_markdown(name2)}"
+        ))
+        container.add_item(discord.ui.TextDisplay(
+            f"### {title}\n\n{challenge}\n\n"
+            "-# No relationship required — friends, siblings, partners, teammates, or randoms can use it."
+        ))
+        view.add_item(container)
+        await ctx.send(view=view)
 
 
 async def setup(bot):

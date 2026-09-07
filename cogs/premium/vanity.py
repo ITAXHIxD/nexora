@@ -1,27 +1,19 @@
 import discord
-import json
-import os
 from discord.ext import commands, tasks
 from datetime import datetime
 import asyncio
 
+from utils.premium_storage import load_premium_data, save_premium_data
+
 class Vanity(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.file = "data/premium.json"
 
     def _get_data(self):
-        """Always fresh data - fixes stale cache issue"""
-        if os.path.exists(self.file):
-            with open(self.file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return {"subscriptions": {}, "vanity": {"roles": {}, "settings": {}}, "grandfathered": []}
+        return load_premium_data()
 
     def _save_data(self, data):
-        """Save with proper encoding"""
-        os.makedirs(os.path.dirname(self.file), exist_ok=True)
-        with open(self.file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        save_premium_data(data)
 
     def _update_data(self, update_func):
         """Helper to update data atomically"""

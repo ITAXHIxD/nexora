@@ -19,6 +19,21 @@ from typing import Optional
 
 import discord
 from discord import app_commands
+
+# Components V2 support in this cog is written against the released 2.7.x API.
+# Older 2.6 builds are intentionally rejected instead of failing later with
+# opaque enum/serialization errors such as: int has no attribute 'value'.
+try:
+    _DPT = tuple(discord.version_info[:3])
+except Exception:
+    _DPT = tuple(int(x) for x in discord.__version__.split(".")[:3])
+
+if _DPT < (2, 7, 1):
+    raise RuntimeError(
+        f"help.py requires discord.py >= 2.7.1 for its Components V2 UI; "
+        f"detected {discord.__version__}. Upgrade with: "
+        f"python -m pip install -U discord.py"
+    )
 from discord.ext import commands
 
 # used to detect cog category from file path
@@ -73,15 +88,16 @@ COMMAND_DATA = {
         ],
         "notes": [
             "Accepted formats: `15/04` `04/15` `15-04-2001` `15.04` `April 15` `15 April`",
+            "If a numeric date can mean two things, the bot asks you to choose the correct interpretation",
             "If the date is ambiguous (e.g. `05/06`) two buttons will appear — tap the correct one",
             "You can update your birthday anytime by running the command again",
             "The year is optional but needed for age calculation on your birthday",
         ],
-        "related": ["birthday", "birthdaylist", "editbirthday", "myprofile"],
+        "related": ["birthday", "birthdaylist", "editbirthday", "editprofile", "myprofile"],
     },
     "birthday": {
         "name": "birthday",
-        "aliases": ["bday"],
+        "aliases": [],
         "category": "utility",
         "premium": False,
         "admin": False,
@@ -105,7 +121,7 @@ COMMAND_DATA = {
     },
     "birthdaylist": {
         "name": "birthdaylist",
-        "aliases": ["bdaylist"],
+        "aliases": [],
         "category": "utility",
         "premium": False,
         "admin": False,
@@ -121,18 +137,42 @@ COMMAND_DATA = {
         ],
         "notes": [
             "Default limit is 10, maximum is 25",
+            "Entries are sorted by how soon the next birthday occurs",
             "🎂 = birthday is TODAY, 🎈 = upcoming",
             "Only shows members who have set their birthday with `/setbirthday`",
         ],
         "related": ["setbirthday", "birthday"],
     },
+    "birthdayhelp": {
+        "name": "birthdayhelp",
+        "aliases": [],
+        "category": "utility",
+        "premium": False,
+        "admin": False,
+        "description": "Open the interactive birthday system command guide",
+        "usage": [
+            "n!birthdayhelp",
+            "/birthdayhelp",
+        ],
+        "examples": [
+            "n!birthdayhelp",
+            "/birthdayhelp",
+        ],
+        "notes": [
+            "Interactive menu with Home, Free Commands, Premium Commands, and Admin Setup sections",
+            "The guide explains the automatic intro parser and birthday announcement system",
+            "Available to everyone",
+        ],
+        "related": ["setbirthday", "birthday", "birthdaylist", "introbdsetup"],
+    },
+
     "editbirthday": {
         "name": "editbirthday",
         "aliases": [],
         "category": "utility",
-        "premium": True,
+        "premium": False,
         "admin": False,
-        "description": "👑 Premium — Fix your birthday if it was parsed wrong",
+        "description": "Fix your birthday if it was parsed wrong",
         "usage": [
             "n!editbirthday <month> <day> [year]",
             "/editbirthday <month> <day> [year]",
@@ -144,6 +184,7 @@ COMMAND_DATA = {
         ],
         "notes": [
             "Month and day must be numbers (e.g. `4` for April, `15` for the 15th)",
+            "This correction command is FREE — premium is not required",
             "Year is optional — only needed for age display",
             "Use this if the intro parser got your date wrong",
         ],
@@ -153,9 +194,9 @@ COMMAND_DATA = {
         "name": "editprofile",
         "aliases": [],
         "category": "utility",
-        "premium": True,
+        "premium": False,
         "admin": False,
-        "description": "👑 Premium — Update your name, age, or pronouns from your intro",
+        "description": "Update your name, age, or pronouns from your intro",
         "usage": [
             "n!editprofile [name] [age] [pronouns]",
             "/editprofile [name] [age] [pronouns]",
@@ -167,6 +208,7 @@ COMMAND_DATA = {
         ],
         "notes": [
             "All fields are optional — only provide what you want to change",
+            "This profile correction command is FREE — premium is not required",
             "This edits what the bot parsed from your #introductions message",
             "Changes are shown in `/myprofile` and on your birthday announcement",
         ],
@@ -176,9 +218,9 @@ COMMAND_DATA = {
         "name": "myprofile",
         "aliases": [],
         "category": "utility",
-        "premium": True,
+        "premium": False,
         "admin": False,
-        "description": "👑 Premium — View your full birthday & intro profile",
+        "description": "View your full birthday & intro profile",
         "usage": [
             "n!myprofile",
             "/myprofile",
@@ -189,6 +231,7 @@ COMMAND_DATA = {
         ],
         "notes": [
             "Shows your name, pronouns, age, birthday, announcement scope, and custom wish",
+            "Profile viewing, corrections, custom wishes, and DM preferences are all free",
             "Only visible to you (ephemeral — hidden from others)",
             "Use `/editprofile` or `/editbirthday` to change anything",
         ],
@@ -198,9 +241,9 @@ COMMAND_DATA = {
         "name": "birthdaywish",
         "aliases": [],
         "category": "utility",
-        "premium": True,
+        "premium": False,
         "admin": False,
-        "description": "👑 Premium — Set a custom message for your birthday announcement",
+        "description": "Set a custom message for your birthday announcement",
         "usage": [
             "n!birthdaywish <message>",
             "/birthdaywish <message>",
@@ -245,9 +288,9 @@ COMMAND_DATA = {
         "name": "birthdaynotify",
         "aliases": [],
         "category": "utility",
-        "premium": True,
+        "premium": False,
         "admin": False,
-        "description": "👑 Premium — Toggle DM notifications when someone wishes you",
+        "description": "Choose whether birthday wishes send you a DM",
         "usage": [
             "n!birthdaynotify <true|false>",
             "/birthdaynotify <true|false>",
@@ -283,7 +326,7 @@ COMMAND_DATA = {
             "Requires **Manage Server** permission",
             "Once set, the bot automatically reads new messages in the intro channel",
             "The birthday role (optional) is given to members on their birthday for 24 hours",
-            "Use `/scanintros` (premium) to import old intro messages retroactively",
+            "Use `/scanintros` to import recent intro messages retroactively",
         ],
         "related": ["scanintros", "birthdaylist"],
     },
@@ -291,9 +334,9 @@ COMMAND_DATA = {
         "name": "scanintros",
         "aliases": [],
         "category": "utility",
-        "premium": True,
+        "premium": False,
         "admin": True,
-        "description": "👑 Premium Admin — Scan past intro messages to import birthday data",
+        "description": "Admin — Scan past intro messages to import birthday data",
         "usage": [
             "n!scanintros [limit]",
             "/scanintros [limit]",
@@ -305,7 +348,7 @@ COMMAND_DATA = {
         ],
         "notes": [
             "Requires **Manage Server** permission",
-            "Default: scans last 100 messages. Max: 200",
+            "Free: scans up to 100 messages. Premium increases the limit to 1,000",
             "Safe to run multiple times — won't duplicate existing entries",
             "Run `/introbdsetup` first before scanning",
         ],
@@ -334,7 +377,7 @@ COMMAND_DATA = {
         "notes": [
             "Your nickname gets `[AFK]` prepended automatically",
             "Send **any message** (not a command) to remove AFK",
-            "When someone mentions you, the bot notifies them you're AFK",
+            "When someone mentions you, the bot leaves a persistent reply with your reason and away time",
             "`global_afk: true` applies your AFK across all servers the bot is in",
             "You'll get a DM summary of everyone who mentioned you while you were AFK",
         ],
@@ -658,7 +701,7 @@ COMMAND_DATA = {
 
 # ── Category metadata ──────────────────────────────────────────────────────────
 CATEGORIES = {
-    "utility":    {"emoji": "🔧", "label": "Utility",    "desc": "AFK, birthday, and other utilities"},
+    "utility":    {"emoji": "🔧", "label": "Utility",    "desc": "AFK, birthdays, profiles, and other utilities"},
     "fun":        {"emoji": "🎮", "label": "Fun",         "desc": "Reaction and fun commands"},
     "info":       {"emoji": "ℹ️",  "label": "Info",        "desc": "Server, user, and bot info"},
     "moderation": {"emoji": "🛡️", "label": "Moderation", "desc": "Mod tools"},
@@ -708,218 +751,325 @@ def get_related(command_name: str, limit: int = 4):
             suggestions.append(COMMAND_DATA[r])
     return suggestions
 
-# ── Embed builders ─────────────────────────────────────────────────────────────
+# ── Components V2 builders ─────────────────────────────────────────────────────
 
-def build_main_embed(bot) -> discord.Embed:
-    p = prefix(bot)
-    embed = discord.Embed(
-        title="🌌 Nexora Help Center",
-        description=(
-            f"**Prefix:** `{p}` · **Slash:** `/`\n"
-            f"`{p}help <command>` or `/help <command>` for detailed help on any command\n"
-            f"Use the **dropdown** to browse a category or **Search** to find a command\n\u200b"
-        ),
-        color=cfg_color(bot, "embed_color"),
+HAS_COMPONENTS_V2 = hasattr(discord.ui, "LayoutView") and hasattr(discord.ui, "Container")
+if not HAS_COMPONENTS_V2:
+    raise RuntimeError(
+        "Help Components V2 UI requires discord.py 2.6+; "
+        "please upgrade discord.py before loading this cog."
     )
-    # Use live registry if available (auto-synced from loaded cogs)
-    registry = getattr(bot, "_help_registry", COMMAND_DATA)
-    by_cat = {}
-    for data in registry.values():
-        by_cat.setdefault(data["category"], []).append(data)
-
-    for cat_key, cat_data in CATEGORIES.items():
-        cmds = by_cat.get(cat_key, [])
-        if not cmds: continue
-        free_cmds    = [d for d in cmds if not d.get("premium")]
-        premium_cmds = [d for d in cmds if d.get("premium")]
-        lines = []
-        if free_cmds:
-            lines.append(" ".join(f"`{d['name']}`" for d in free_cmds))
-        if premium_cmds:
-            lines.append("👑 " + " ".join(f"`{d['name']}`" for d in premium_cmds))
-        embed.add_field(
-            name=f"{cat_data['emoji']} {cat_data['label']} ({len(cmds)})",
-            value="\n".join(lines) or "—",
-            inline=True,
-        )
-    embed.set_footer(text=f"Nexora · {len(registry)} commands loaded · 👑 = Premium only")
-    return embed
 
 
-def build_command_embed(bot, data: dict) -> discord.Embed:
-    p    = prefix(bot)
-    prem = data.get("premium", False)
-    adm  = data.get("admin", False)
-    color = 0xFFD700 if prem else cfg_color(bot, "success_color", 0x57F287)
+def _hex_color(bot, key: str, fallback: int) -> int:
+    return cfg_color(bot, key, fallback)
 
-    # Badge line
+
+def _color_for_command(bot, data: dict) -> int:
+    if data.get("premium"):
+        return _hex_color(bot, "premium_color", 0xFFBF47)
+    if data.get("admin"):
+        return _hex_color(bot, "warning_color", 0xFFAC33)
+    return _hex_color(bot, "embed_color", 0x5865F2)
+
+
+def _badge_line(data: dict) -> str:
     badges = []
-    if prem: badges.append("👑 **Premium**")
-    if adm:  badges.append("🛡️ **Requires Permission**")
-    badge_line = "  ·  ".join(badges)
-
-    cat     = CATEGORIES.get(data["category"], {})
-    aliases = data.get("aliases", [])
-    alias_str = "  ".join(f"`{a}`" for a in aliases) if aliases else "None"
-
-    embed = discord.Embed(
-        title=f"📖 /{data['name']}",
-        description=(
-            f"{badge_line + chr(10) if badge_line else ''}"
-            f"> {data['description']}\n\u200b"
-        ),
-        color=color,
-    )
-
-    # Quick info row
-    embed.add_field(name="📂 Category", value=f"{cat.get('emoji','')} {cat.get('label', data['category'])}", inline=True)
-    embed.add_field(name="🔀 Aliases",  value=alias_str,                                                              inline=True)
-    embed.add_field(name="🔒 Access",   value="👑 Premium" if prem else ("🛡️ Admin" if adm else "✅ Everyone"),       inline=True)
-
-    # Usage — prefix version + slash version separately
-    prefix_usage = [u for u in data["usage"] if u.startswith("n!")]
-    slash_usage  = [u for u in data["usage"] if u.startswith("/")]
-    usage_val = ""
-    if prefix_usage: usage_val += "**Prefix**\n" + "\n".join(f"`{u}`" for u in prefix_usage) + "\n"
-    if slash_usage:  usage_val += "\n**Slash**\n" + "\n".join(f"`{u}`" for u in slash_usage)
-    embed.add_field(name="📌 Usage", value=usage_val.strip() or "—", inline=False)
-
-    # Examples
-    if data.get("examples"):
-        ex = "\n".join(f"` ` `{e}`" for e in data["examples"])
-        embed.add_field(name="💡 Examples", value=ex, inline=False)
-
-    # Notes
-    if data.get("notes"):
-        notes = "\n".join(f"**›** {n}" for n in data["notes"])
-        embed.add_field(name="📝 Tips & Notes", value=notes, inline=False)
-
-    # Related
-    related = get_related(data["name"])
-    if related:
-        rel = "  ".join(f"`/{r['name']}`  {CATEGORIES.get(r['category'],{}).get('emoji','')} *{r['description'][:40]}…*" for r in related)
-        embed.add_field(name="🔗 See Also", value="\n".join(f"`/{r['name']}` — {r['description'][:55]}" for r in related), inline=False)
-
-    if data.get("_auto_stub"):
-        embed.set_footer(text="⚠ Auto-detected command — full docs coming soon · Nexora")
-    else:
-        embed.set_footer(text="Nexora · n!help or /help to browse all commands")
-    return embed
+    if data.get("premium"):
+        badges.append("👑 **Premium**")
+    if data.get("admin"):
+        badges.append("🛡️ **Admin**")
+    return " · ".join(badges)
 
 
-def build_search_results_embed(bot, query: str, results: list) -> discord.Embed:
-    if not results:
-        embed = discord.Embed(
-            title=f"🔍 No results for `{query}`",
-            description=(
-                "Try a shorter or different keyword.\n\n"
-                "**Popular commands:** "
-                + " ".join(f"`{n}`" for n in list(COMMAND_DATA)[:6])
-            ),
-            color=cfg_color(bot, "error_color", 0xED4245),
-        )
-        return embed
-
-    embed = discord.Embed(
-        title=f"🔍 Search results for `{query}`",
-        description=f"Found **{len(results)}** result(s). Tap a command name below for details.\n\u200b",
-        color=cfg_color(bot, "embed_color"),
-    )
-    for data in results:
-        badges = ("👑 " if data.get("premium") else "") + ("🛡️ " if data.get("admin") else "")
-        embed.add_field(
-            name=f"{badges}`/{data['name']}`",
-            value=f"{data['description']}\n`{data['usage'][0]}`",
-            inline=False,
-        )
-    embed.set_footer(text="Use /help <command> for full details on any command")
-    return embed
+def _display_limit(text: str, limit: int = 3900) -> str:
+    text = text or ""
+    return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
-def build_category_embed(bot, cat_key: str) -> discord.Embed:
-    cat = CATEGORIES.get(cat_key, {"emoji": "📂", "label": cat_key.title(), "desc": ""})
-    embed = discord.Embed(
-        title=f"{cat['emoji']} {cat['label']} Commands",
-        description=cat["desc"] + "\n\u200b",
-        color=cfg_color(bot, "embed_color"),
-    )
-    registry = getattr(bot, "_help_registry", COMMAND_DATA)
-    cmds = [d for d in registry.values() if d["category"] == cat_key]
-    if not cmds:
-        embed.description = "No commands in this category yet."
-        return embed
-    for data in cmds:
-        badges = ("👑 " if data.get("premium") else "") + ("🛡️ " if data.get("admin") else "")
-        embed.add_field(
-            name=f"{badges}`/{data['name']}`",
-            value=f"{data['description']}\n`{data['usage'][0]}`",
-            inline=False,
-        )
-    embed.set_footer(text=f"Use /help <command> for detailed help • {len(cmds)} commands in this category")
-    return embed
+class HelpLayoutView(discord.ui.LayoutView):
+    """Reusable modern Components V2 shell for the help center."""
 
-# ── Views ──────────────────────────────────────────────────────────────────────
-
-class HelpView(discord.ui.View):
-    def __init__(self, bot, user_id: int):
-        super().__init__(timeout=300)
-        self.bot     = bot
+    def __init__(self, *, bot, user_id=None, color=0x5865F2, timeout=300):
+        super().__init__(timeout=timeout)
+        self.bot = bot
         self.user_id = user_id
-        self.message = None
+        self._color = color
+        self.container = discord.ui.Container(accent_colour=color)
+        self.add_item(self.container)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ Use `/help` to open your own help menu.", ephemeral=True)
+        if self.user_id is not None and interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "❌ This help panel belongs to someone else. Use `/help` to open your own.",
+                ephemeral=True,
+            )
             return False
         return True
 
+    def _reset(self):
+        self.container.clear_items()
+
+    def add_text(self, text: str):
+        self.container.add_item(discord.ui.TextDisplay(_display_limit(text)))
+
+    def add_separator(self):
+        self.container.add_item(discord.ui.TextDisplay("━━━━━━━━━━━━━━━━━━━━━━━━"))
+
+    def add_row(self, *items):
+        row = discord.ui.ActionRow()
+        for item in items:
+            row.add_item(item)
+        self.container.add_item(row)
+        return row
+
     async def on_timeout(self):
-        for item in self.children:
-            if hasattr(item, "disabled"):
-                item.disabled = True
+        for item in self.container.children:
+            if isinstance(item, discord.ui.ActionRow):
+                for child in item.children:
+                    if hasattr(child, "disabled"):
+                        child.disabled = True
         try:
-            if self.message: await self.message.edit(view=self)
-        except: pass
+            if self.message:
+                await self.message.edit(view=self)
+        except Exception:
+            pass
 
-    @discord.ui.select(
-        placeholder="📂 Browse a category...",
-        options=[
-            discord.SelectOption(label="🏠 Main Menu",    value="main"),
-            discord.SelectOption(label="🔧 Utility",      value="utility",    description="AFK, Birthday, and more"),
-            discord.SelectOption(label="🎮 Fun",           value="fun",        description="Reaction and fun commands"),
-            discord.SelectOption(label="ℹ️ Info",           value="info",       description="Server, user, bot info"),
-            discord.SelectOption(label="🛡️ Moderation",   value="moderation", description="Moderation tools"),
-            discord.SelectOption(label="🎲 Games",         value="games",      description="Games and activities"),
-            discord.SelectOption(label="📊 Analytics",     value="analytics",  description="Server stats"),
-            discord.SelectOption(label="⚙️ System",        value="system",     description="Thread and guidelines"),
-            discord.SelectOption(label="👑 Premium",       value="premium",    description="Premium features"),
-        ],
-        min_values=1, max_values=1
-    )
-    async def category_select(self, interaction: discord.Interaction, select: discord.ui.Select):
-        await interaction.response.defer()
-        val = select.values[0]
-        if val == "main":
-            embed = build_main_embed(self.bot)
+
+def _common_footer(view: HelpLayoutView, text: str):
+    view.add_separator()
+    view.add_text(f"-# {text}")
+
+
+def build_main_view(bot, user_id: int) -> "HelpMainView":
+    return HelpMainView(bot=bot, user_id=user_id)
+
+
+class HelpMainView(HelpLayoutView):
+    def __init__(self, *, bot, user_id, timeout=300):
+        super().__init__(bot=bot, user_id=user_id, color=_hex_color(bot, "embed_color", 0x5865F2), timeout=timeout)
+        self.message = None
+        self._build()
+
+    def _build(self):
+        self._reset()
+        registry = getattr(self.bot, "_help_registry", COMMAND_DATA)
+        counts = {}
+        for d in registry.values():
+            counts[d["category"]] = counts.get(d["category"], 0) + 1
+
+        lines = [
+            "# 🌌 Nexora Help Center",
+            "",
+            f"**Prefix:** `{prefix(self.bot)}` or `{prefix(self.bot).swapcase()}`  ·  **Slash:** `/`",
+            "",
+            "Browse every command, search by keyword, or open a command directly.",
+            "",
+            "**Quick start**",
+            f"`{prefix(self.bot)}help <command>`  ·  `/help <command>`",
+            "",
+            f"📚 **{len(registry)}** commands indexed",
+            "",
+            "🎂 **Birthday System** — reads configured introductions, stores server-specific profiles, posts scheduled announcements, and supports optional birthday roles. Personal setup and privacy controls are free; premium adds cross-server reach.",
+        ]
+
+        visible_categories = [k for k,v in CATEGORIES.items() if counts.get(k)]
+        if visible_categories:
+            lines += ["", "**Categories**"]
+            for key in visible_categories:
+                cat = CATEGORIES[key]
+                lines.append(f"{cat['emoji']} **{cat['label']}** — `{counts[key]}` commands · {cat['desc']}")
+
+        self.add_text("\n".join(lines))
+
+        select = discord.ui.Select(
+            placeholder="📂 Browse a category...",
+            custom_id="help-category",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(label="🏠 Main Menu", value="main", description="Back to the Help Center"),
+                *[
+                    discord.SelectOption(
+                        label=f"{v['emoji']} {v['label']}",
+                        value=k,
+                        description=v["desc"][:100],
+                    )
+                    for k, v in CATEGORIES.items()
+                    if counts.get(k)
+                ],
+            ],
+        )
+        select.callback = self._category_callback
+        search = discord.ui.Button(
+            label="Search Command",
+            style=discord.ButtonStyle.primary,
+            emoji="🔍",
+            custom_id="help-search",
+        )
+        search.callback = self._search_callback
+        self.add_row(select)
+        self.add_row(search)
+        _common_footer(self, "Select a category or search by command name, alias, or keyword.")
+
+    async def _category_callback(self, interaction: discord.Interaction):
+        select = interaction.data
+        key = (select.get("values") or ["main"])[0]
+        if key == "main":
+            new_view = HelpMainView(bot=self.bot, user_id=self.user_id, timeout=self.timeout)
         else:
-            embed = build_category_embed(self.bot, val)
-        await interaction.edit_original_response(embed=embed, view=self)
+            new_view = HelpCategoryView(bot=self.bot, user_id=self.user_id, cat_key=key, timeout=self.timeout)
+        await interaction.response.edit_message(view=new_view)
 
-    @discord.ui.button(label="🔍 Search Command", style=discord.ButtonStyle.blurple)
-    async def search_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _search_callback(self, interaction: discord.Interaction):
         await interaction.response.send_modal(SearchModal(self.bot))
 
-    @discord.ui.button(label="🏠 Home", style=discord.ButtonStyle.grey)
-    async def home_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()
-        embed = build_main_embed(self.bot)
-        await interaction.edit_original_response(embed=embed, view=self)
+
+class HelpCategoryView(HelpLayoutView):
+    COMMANDS_PER_PAGE = 8
+
+    def __init__(self, *, bot, user_id, cat_key, page=0, timeout=300):
+        color = _hex_color(bot, "embed_color", 0x5865F2)
+        super().__init__(bot=bot, user_id=user_id, color=color, timeout=timeout)
+        self.cat_key = cat_key
+        self.page = page
+        self.message = None
+        self._build()
+
+    def _build(self):
+        self._reset()
+        cat = CATEGORIES.get(self.cat_key, {"emoji":"📂", "label":self.cat_key.title(), "desc":""})
+        registry = getattr(self.bot, "_help_registry", COMMAND_DATA)
+        # Alias entries are searchable, but only the canonical command belongs
+        # in the browsing list.
+        cmds = [
+            data for name, data in registry.items()
+            if data["category"] == self.cat_key and name == data["name"]
+        ]
+        cmds.sort(key=lambda data: data["name"])
+        total_pages = max(1, (len(cmds) + self.COMMANDS_PER_PAGE - 1) // self.COMMANDS_PER_PAGE)
+        self.page = max(0, min(self.page, total_pages - 1))
+        start = self.page * self.COMMANDS_PER_PAGE
+        page_cmds = cmds[start:start + self.COMMANDS_PER_PAGE]
+
+        self.add_text(
+            f"# {cat['emoji']} {cat['label']}\n\n"
+            f"{cat['desc']}\n\n"
+            f"**{len(cmds)}** command(s) in this category · Page **{self.page + 1}/{total_pages}**."
+        )
+
+        for data in page_cmds:
+            badge = _badge_line(data)
+            self.add_separator()
+            self.add_text(
+                f"{badge + chr(10) if badge else ''}"
+                f"### `/{data['name']}`\n"
+                f"{data['description']}\n"
+                f"-# {(data.get('usage') or ['/' + data['name']])[0]}"
+            )
+
+        back = discord.ui.Button(label="Home", style=discord.ButtonStyle.secondary, emoji="🏠", custom_id="help-home")
+        back.callback = self._home_callback
+        search = discord.ui.Button(label="Search", style=discord.ButtonStyle.primary, emoji="🔍", custom_id="help-search-cat")
+        search.callback = self._search_callback
+        self.add_row(back, search)
+        if total_pages > 1:
+            previous = discord.ui.Button(label="Previous", style=discord.ButtonStyle.secondary, emoji="◀", disabled=self.page == 0)
+            next_page = discord.ui.Button(label="Next", style=discord.ButtonStyle.secondary, emoji="▶", disabled=self.page >= total_pages - 1)
+            previous.callback = self._page_callback(-1)
+            next_page.callback = self._page_callback(1)
+            self.add_row(previous, next_page)
+        _common_footer(self, f"Use `/help <command>` for full details · {len(cmds)} commands")
+
+    async def _home_callback(self, interaction):
+        await interaction.response.edit_message(view=HelpMainView(bot=self.bot, user_id=self.user_id, timeout=self.timeout))
+
+    async def _search_callback(self, interaction):
+        await interaction.response.send_modal(SearchModal(self.bot))
+
+    def _page_callback(self, direction: int):
+        async def callback(interaction: discord.Interaction):
+            await interaction.response.edit_message(view=HelpCategoryView(
+                bot=self.bot,
+                user_id=self.user_id,
+                cat_key=self.cat_key,
+                page=self.page + direction,
+                timeout=self.timeout,
+            ))
+        return callback
 
 
-class SearchModal(discord.ui.Modal, title="🔍 Search Commands"):
+class CommandDetailView(HelpLayoutView):
+    def __init__(self, *, bot, user_id, data, timeout=300):
+        super().__init__(bot=bot, user_id=user_id, color=_color_for_command(bot, data), timeout=timeout)
+        self.data = data
+        self.message = None
+        self._build()
+
+    def _build(self):
+        self._reset()
+        data = self.data
+        cat = CATEGORIES.get(data["category"], {})
+        badge = _badge_line(data)
+        lines = [
+            f"# 📖 /{data['name']}",
+            "",
+        ]
+        if badge:
+            lines += [badge, ""]
+        lines += [
+            f"> {data['description']}",
+            "",
+            f"📂 **Category:** {cat.get('emoji','📂')} {cat.get('label', data['category'])}",
+            f"🔒 **Access:** {'👑 Premium' if data.get('premium') else ('🛡️ Admin' if data.get('admin') else '✅ Everyone')}",
+        ]
+        if data.get("aliases"):
+            lines.append("🔀 **Aliases:** " + " · ".join(f"`{x}`" for x in data["aliases"]))
+        self.add_text("\n".join(lines))
+
+        if data.get("usage"):
+            self.add_separator()
+            self.add_text("## 📌 Usage\n" + "\n".join(f"`{u}`" for u in data["usage"]))
+
+        if data.get("examples"):
+            self.add_separator()
+            self.add_text("## 💡 Examples\n" + "\n".join(f"`{e}`" for e in data["examples"]))
+
+        if data.get("notes"):
+            self.add_separator()
+            self.add_text("## 📝 Tips & Notes\n" + "\n".join(f"› {n}" for n in data["notes"]))
+
+        related = get_related(data["name"])
+        if related:
+            self.add_separator()
+            self.add_text(
+                "## 🔗 See Also\n" +
+                "\n".join(f"`/{r['name']}` — {r['description']}" for r in related)
+            )
+
+        if data.get("_auto_stub"):
+            footer = "Live command reference · Usage and parameters are kept in sync automatically"
+        else:
+            footer = "Nexora Help Center · Use `/help` to browse all commands"
+        _common_footer(self, footer)
+
+        home = discord.ui.Button(label="Home", style=discord.ButtonStyle.secondary, emoji="🏠", custom_id="help-detail-home")
+        home.callback = self._home_callback
+        search = discord.ui.Button(label="Search", style=discord.ButtonStyle.primary, emoji="🔍", custom_id="help-detail-search")
+        search.callback = self._search_callback
+        self.add_row(home, search)
+
+    async def _home_callback(self, interaction):
+        await interaction.response.edit_message(view=HelpMainView(bot=self.bot, user_id=self.user_id, timeout=self.timeout))
+
+    async def _search_callback(self, interaction):
+        await interaction.response.send_modal(SearchModal(self.bot))
+
+
+class SearchModal(discord.ui.Modal, title="🔍 Search Nexora Commands"):
     query = discord.ui.TextInput(
         label="Command name or keyword",
-        placeholder="e.g. birthday, afk, set...",
+        placeholder="Try: birthday, moderation, afk, premium...",
         max_length=40,
         min_length=2,
     )
@@ -930,43 +1080,77 @@ class SearchModal(discord.ui.Modal, title="🔍 Search Commands"):
 
     async def on_submit(self, interaction: discord.Interaction):
         registry = getattr(self.bot, "_help_registry", COMMAND_DATA)
-        results = search_commands(self.query.value, registry=registry)
-        embed   = build_search_results_embed(self.bot, self.query.value, results)
-
-        # If exact match — show full detail directly
+        results = search_commands(self.query.value, limit=5, registry=registry)
         exact = registry.get(self.query.value.lower().strip())
+
         if exact:
-            embed = build_command_embed(self.bot, exact)
+            view = CommandDetailView(bot=self.bot, user_id=interaction.user.id, data=exact)
+            await interaction.response.send_message(view=view, ephemeral=True)
+            return
 
-        view = SearchResultView(self.bot, interaction.user.id, results)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        view = SearchResultView(bot=self.bot, user_id=interaction.user.id, query=self.query.value, results=results)
+        await interaction.response.send_message(view=view, ephemeral=True)
 
 
-class SearchResultView(discord.ui.View):
-    """Appears after a search — buttons for each result to drill into detail"""
-    def __init__(self, bot, user_id: int, results: list):
-        super().__init__(timeout=120)
-        self.bot     = bot
-        self.user_id = user_id
-        for data in results[:5]:
-            label = f"/{data['name']}"
-            if data.get("_auto_stub"):
-                label += "  ·  undocumented"
+class SearchResultView(HelpLayoutView):
+    def __init__(self, *, bot, user_id, query, results, timeout=120):
+        super().__init__(bot=bot, user_id=user_id, color=_hex_color(bot, "embed_color", 0x5865F2), timeout=timeout)
+        self.query = query
+        self.results = results
+        self._build()
+
+    def _build(self):
+        self._reset()
+        if not self.results:
+            popular = " ".join(f"`{n}`" for n in list(COMMAND_DATA)[:6])
+            self.add_text(
+                f"# 🔍 No results\n\n"
+                f"Nothing matched `{self.query}`.\n\n"
+                f"**Try:** a shorter keyword or one of these popular commands:\n{popular}"
+            )
+            home = discord.ui.Button(label="Home", style=discord.ButtonStyle.secondary, emoji="🏠", custom_id="search-home")
+            home.callback = self._home_callback
+            self.add_row(home)
+            return
+
+        self.add_text(
+            f"# 🔍 Search Results\n\n"
+            f"Found **{len(self.results)}** result(s) for `{self.query}`.\n"
+            "Choose a command below for its full documentation."
+        )
+        for data in self.results:
+            badge = _badge_line(data)
+            self.add_separator()
+            self.add_text(
+                f"{badge + chr(10) if badge else ''}"
+                f"### `/{data['name']}`\n"
+                f"{data['description']}\n"
+                f"-# {(data.get('usage') or ['/' + data['name']])[0]}"
+            )
+
+        for data in self.results[:5]:
             btn = discord.ui.Button(
-                label=label[:80],
-                style=discord.ButtonStyle.grey,
-                custom_id=f"cmd_{data['name']}"
+                label=f"/{data['name']}"[:80],
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"help-result-{data['name']}",
             )
             btn.callback = self._make_callback(data)
-            self.add_item(btn)
+            self.add_row(btn)
 
     def _make_callback(self, data):
         async def callback(interaction: discord.Interaction):
-            if interaction.user.id != self.user_id:
-                return await interaction.response.send_message("❌ Not your search.", ephemeral=True)
-            embed = build_command_embed(self.bot, data)
-            await interaction.response.edit_message(embed=embed, view=self)
+            await interaction.response.edit_message(
+                view=CommandDetailView(bot=self.bot, user_id=self.user_id, data=data, timeout=self.timeout)
+            )
         return callback
+
+    async def _home_callback(self, interaction):
+        await interaction.response.edit_message(view=HelpMainView(bot=self.bot, user_id=self.user_id, timeout=self.timeout))
+
+
+def _send_help_view(ctx, view):
+    return ctx.send(view=view)
+
 
 # ── Cog ────────────────────────────────────────────────────────────────────────
 
@@ -974,7 +1158,7 @@ class SearchResultView(discord.ui.View):
 
 def _guess_category(cmd: commands.Command) -> str:
     """Guess category from cog name / module path."""
-    cog = cmd.cog
+    cog = getattr(cmd, "cog", None) or getattr(cmd, "binding", None)
     if cog:
         cog_name = type(cog).__name__.lower()
         module   = (getattr(cog, "__module__", "") or "").lower()
@@ -996,15 +1180,27 @@ def _guess_category(cmd: commands.Command) -> str:
 
 
 def _make_stub(cmd: commands.Command) -> dict:
-    """Build a minimal COMMAND_DATA-style entry from a live command object."""
+    """Build useful live documentation for a command without a hand-written entry."""
     p = "n!"
-    name    = cmd.name
-    aliases = list(cmd.aliases or [])
-    desc    = cmd.description or cmd.help or "No description yet."
+    name = cmd.name
+    aliases = list(getattr(cmd, "aliases", []) or [])
+    desc = getattr(cmd, "description", None) or getattr(cmd, "help", None) or "No description provided."
     # Trim discord's verbose help strings
     if len(desc) > 80:
         desc = desc[:77] + "…"
-    usage = [f"n!{name}", f"/{name}"]
+    signature = (getattr(cmd, "signature", "") or "").strip()
+    if not signature:
+        parameters = getattr(cmd, "parameters", []) or []
+        parts = []
+        for parameter in parameters:
+            parameter_name = getattr(parameter, "name", "option")
+            required = getattr(parameter, "required", False)
+            parts.append(f"<{parameter_name}>" if required else f"[{parameter_name}]")
+        signature = " ".join(parts)
+    suffix = f" {signature}" if signature else ""
+    parameter_note = (
+        f"Parameters: `{signature}`" if signature else "No parameters required."
+    )
     return {
         "name":        name,
         "aliases":     aliases,
@@ -1012,11 +1208,15 @@ def _make_stub(cmd: commands.Command) -> dict:
         "premium":     False,
         "admin":       False,
         "description": desc,
-        "usage":       usage,
-        "examples":    [],
-        "notes":       ["Full documentation coming soon."],
+        "usage":       [f"n!{name}{suffix}", f"N!{name}{suffix}", f"/{name}{suffix}"],
+        "examples":    [f"/{name}{suffix}"],
+        "notes":       [
+            parameter_note,
+            "Prefix commands accept either `n!` or `N!`.",
+            "This reference is generated from the live command registration.",
+        ],
         "related":     [],
-        "_auto_stub":  True,   # flag so we know this was auto-generated
+        "_auto_stub":  True,
     }
 
 
@@ -1053,6 +1253,14 @@ class Help(commands.Cog):
                     stub["related"] = [name]
                     registry[alias] = stub
 
+        # Pure slash commands do not appear in bot.commands. Add them too so
+        # `/help` documents every command users can actually invoke.
+        for cmd in self.bot.tree.walk_commands():
+            name = cmd.name
+            if name in skip or name in registry:
+                continue
+            registry[name] = _make_stub(cmd)
+
         self.bot._help_registry = registry
 
     async def cog_unload(self):
@@ -1077,42 +1285,27 @@ class Help(commands.Cog):
           /help afk
           n!help birthday
         """
+        registry = getattr(self.bot, "_help_registry", COMMAND_DATA)
         if command:
-            query    = command.lower().strip()
-            registry = getattr(self.bot, "_help_registry", COMMAND_DATA)
-
-            # Exact match
+            query = command.lower().strip()
             data = registry.get(query)
-            # Alias match
             if not data:
                 for d in registry.values():
                     if query in (d.get("aliases") or []):
                         data = d
                         break
-            # Fuzzy match
             if not data:
                 results = search_commands(query, limit=5, registry=registry)
-                if results:
-                    if len(results) == 1:
-                        data = results[0]
-                    else:
-                        # Show search results with buttons
-                        embed = build_search_results_embed(self.bot, query, results)
-                        view  = SearchResultView(self.bot, ctx.author.id, results)
-                        msg   = await ctx.send(embed=embed, view=view)
-                        return
-                else:
-                    embed = build_search_results_embed(self.bot, query, [])
-                    return await ctx.send(embed=embed)
-
-            embed = build_command_embed(self.bot, data)
-            view  = HelpView(self.bot, ctx.author.id)
-            msg   = await ctx.send(embed=embed, view=view)
+                view = SearchResultView(bot=self.bot, user_id=ctx.author.id, query=query, results=results)
+                msg = await ctx.send(view=view)
+                view.message = msg
+                return
+            view = CommandDetailView(bot=self.bot, user_id=ctx.author.id, data=data)
+            msg = await ctx.send(view=view)
             view.message = msg
         else:
-            embed = build_main_embed(self.bot)
-            view  = HelpView(self.bot, ctx.author.id)
-            msg   = await ctx.send(embed=embed, view=view)
+            view = HelpMainView(bot=self.bot, user_id=ctx.author.id)
+            msg = await ctx.send(view=view)
             view.message = msg
 
 

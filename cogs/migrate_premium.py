@@ -11,18 +11,22 @@ Then delete this file.
 """
 
 import asyncio
-import json
 import os
 from datetime import datetime, timezone
 
 import motor.motor_asyncio
 from dotenv import load_dotenv
 
+from utils.premium_storage import (
+    LEGACY_PREMIUM_DATA_PATH,
+    PREMIUM_DATA_PATH,
+    load_premium_data,
+)
+
 load_dotenv()
 
 MONGO_URI   = os.getenv("MONGO_URI")
 DB_NAME     = os.getenv("MONGO_DB", "botdb")
-JSON_FILE   = "data/premium.json"
 
 # Tier name remapping — your old file used ULTRA/CUSTOM, new uses ENTERPRISE/CUSTOM
 TIER_REMAP = {
@@ -40,12 +44,11 @@ def _parse(val):
     except: return None
 
 async def migrate():
-    if not os.path.exists(JSON_FILE):
-        print(f"❌ {JSON_FILE} not found.")
+    if not (os.path.exists(PREMIUM_DATA_PATH) or os.path.exists(LEGACY_PREMIUM_DATA_PATH)):
+        print(f"❌ Premium data not found at {PREMIUM_DATA_PATH} or {LEGACY_PREMIUM_DATA_PATH}.")
         return
 
-    with open(JSON_FILE, encoding="utf-8") as f:
-        data = json.load(f)
+    data = load_premium_data()
 
     client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
     db     = client[DB_NAME]
@@ -118,6 +121,6 @@ async def migrate():
 
     client.close()
     print(f"\n━━━ Done: {migrated} migrated, {skipped} skipped ━━━")
-    print("You can now delete this script and premium.json")
+    print("You can now delete this script and the legacy tracked premium.json copy.")
 
 asyncio.run(migrate())

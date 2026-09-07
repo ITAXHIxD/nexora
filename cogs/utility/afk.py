@@ -4,14 +4,22 @@ from discord import app_commands
 import datetime
 from typing import Optional
 import logging
-import asyncio
 
 logger = logging.getLogger(__name__)
 
 
 class AFKView(discord.ui.View):
-    def __init__(self, timeout=180):
+    def __init__(self, user_id: int, timeout=180):
         super().__init__(timeout=timeout)
+        self.user_id = user_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the member who set this AFK status can remove it.", ephemeral=True
+        )
+        return False
 
     @discord.ui.button(label="👋 Remove AFK", style=discord.ButtonStyle.green)
     async def remove_afk_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -104,6 +112,12 @@ class AFK(commands.Cog):
     async def afk(self, ctx: commands.Context, global_afk: Optional[bool] = False, *, reason: Optional[str] = "AFK"):
         if await self.get_afk(ctx.author.id):
             return await ctx.send(embed=discord.Embed(description="❌ You are already AFK!", color=discord.Color.red()))
+        reason = (reason or "AFK").strip()
+        if len(reason) > 300:
+            return await ctx.send(embed=discord.Embed(
+                description="❌ Keep your AFK reason to **300 characters or fewer**.",
+                color=discord.Color.red(),
+            ), ephemeral=True)
         original_name = ctx.author.display_name.replace("[AFK] ", "")
         now = datetime.datetime.now(datetime.timezone.utc)
         await self.set_afk(ctx.author.id, {
@@ -122,7 +136,7 @@ class AFK(commands.Cog):
             color=discord.Color.green(), timestamp=now
         )
         embed.set_footer(text=f"Set by {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
-        await ctx.send(embed=embed, view=AFKView())
+        await ctx.send(embed=embed, view=AFKView(ctx.author.id))
 
     @commands.hybrid_command(name="unafk", description="Manually remove your AFK status")
     async def unafk(self, ctx: commands.Context):
@@ -208,10 +222,7 @@ class AFK(commands.Cog):
                         )
                         if removed.get("mentions"):
                             embed.add_field(name="📬 Mentions", value=f"You were mentioned **{len(removed['mentions'])}** time(s).")
-                        msg = await message.channel.send(embed=embed)
-                        await asyncio.sleep(10)
-                        try: await msg.delete()
-                        except: pass
+                        await message.channel.send(embed=embed)
 
             for mentioned in message.mentions:
                 afk_data = await self.get_afk(mentioned.id)
@@ -221,16 +232,15 @@ class AFK(commands.Cog):
                     mention_str = f"[{message.author.name} in #{message.channel.name}]({message.jump_url})"
                     if self.col:
                         await self.col.update_one({"_id": mentioned.id}, {"$push": {"mentions": mention_str}})
-                    embed = discord.Embed(
-                        title=f"💤 {mentioned.display_name} is AFK",
-                        description=f"**Reason:** {afk_data['reason']}\n**Duration:** {duration}",
-                        color=discord.Color.orange()
+                    # This is deliberately a normal persistent message: the
+                    # person who mentioned them should not lose the reason.
+                    await message.channel.send(
+                        f"💤 **{mentioned.display_name} is AFK**\n"
+                        f"> **Reason:** {afk_data['reason']}\n"
+                        f"> **Away for:** {duration}",
+                        reference=message.to_reference(fail_if_not_exists=False),
+                        allowed_mentions=discord.AllowedMentions.none(),
                     )
-                    embed.set_thumbnail(url=mentioned.display_avatar.url)
-                    notif = await message.channel.send(embed=embed)
-                    await asyncio.sleep(15)
-                    try: await notif.delete()
-                    except: pass
                     if afk_data.get("dm_notifications", True):
                         try:
                             dm_embed = discord.Embed(

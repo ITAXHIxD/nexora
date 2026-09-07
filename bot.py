@@ -13,6 +13,7 @@ from discord.ext import commands, tasks
 
 from utils.config import DATABASE_ENABLED, DISCORD_TOKEN, LOG_CHANNEL_ID, OWNER_ID
 from utils.database import DatabaseManager
+from utils.premium_storage import load_premium_data
 
 # ── MongoDB ────────────────────────────────────────────────────────────────────
 try:
@@ -129,9 +130,10 @@ class CharacterBot(commands.Bot):
         intents.presences = True
 
         super().__init__(
-            command_prefix=commands.when_mentioned_or(DEFAULT_PREFIX),
+            command_prefix=commands.when_mentioned_or(DEFAULT_PREFIX, DEFAULT_PREFIX.swapcase()),
             intents=intents,
             help_command=None,
+            case_insensitive=True,
         )
 
         self.bot_config = bot_config
@@ -282,22 +284,19 @@ class CharacterBot(commands.Bot):
     def is_premium_guild(self, guild_id: int) -> bool:
         guild_str = str(guild_id)
         try:
-            path = os.path.join("data", "premium_data.json")
-            if os.path.exists(path):
-                with open(path, "r", encoding="utf-8") as f:
-                    premium_data = json.load(f)
-                subscription = premium_data.get("subscriptions", {}).get(guild_str)
-                if subscription:
-                    expires_at = subscription.get("expires_at")
-                    if expires_at and expires_at != "null":
-                        try:
-                            if datetime.now(timezone.utc) > datetime.fromisoformat(expires_at):
-                                return False
-                        except ValueError:
-                            pass
-                    return subscription.get("tier", "FREE").lower() != "free"
+            premium_data = load_premium_data()
+            subscription = premium_data.get("subscriptions", {}).get(guild_str)
+            if subscription:
+                expires_at = subscription.get("expires_at")
+                if expires_at and expires_at != "null":
+                    try:
+                        if datetime.now(timezone.utc) > datetime.fromisoformat(expires_at):
+                            return False
+                    except ValueError:
+                        pass
+                return subscription.get("tier", "FREE").lower() != "free"
         except Exception as e:
-            logger.error("Error reading premium_data.json: %s", e)
+            logger.error("Error reading premium runtime data: %s", e)
 
         if guild_str in self.premium_guild_ids:
             return True

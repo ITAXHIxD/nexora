@@ -1,3 +1,15 @@
 .env
+.env.*
+.venv/
+venv/
 __pycache__/
+**/__pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+bot_data.db
+data/premium.json
+data/premium_data.json
+data/private/
