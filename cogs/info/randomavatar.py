@@ -1,107 +1,166 @@
-import discord
-from discord.ext import commands
-from discord import app_commands
-import random
+"""
+cogs/info/randomavatar.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Interactive Components V2 Random Server Member Showcase
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+
 import logging
+import random
+from typing import Optional
+
+import discord
+from discord import app_commands
+from discord.ext import commands
+
+from utils.ui import (
+    BRAND_COLOR,
+    PURPLE_COLOR,
+    SUCCESS_COLOR,
+    NexoraView,
+    DismissButton,
+    send_view,
+    ts_format,
+    status_badge,
+)
+
 logger = logging.getLogger(__name__)
-class RandomAvatarView(discord.ui.View):
-    def __init__(self, user: discord.User, bot):
-        super().__init__(timeout=60)
-        self.user = user
-        self.bot = bot
 
-    @discord.ui.button(label="Avatar", style=discord.ButtonStyle.primary, emoji="🖼️")
-    async def avatar_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Use a color from your config, or keep it random.
-        try:
-            embed_color = int(self.bot.bot_config['ui_settings']['embed_color'], 16)
-        except (KeyError, ValueError):
-            embed_color = discord.Color.blue()
-            
-        embed = discord.Embed(
-            title=f"🖼️ {self.user.display_name}'s Avatar",
-            color=embed_color
+
+class RandomAvatarView(NexoraView):
+    """Interactive Components V2 view for exploring random guild members."""
+
+    def __init__(
+        self,
+        bot: commands.Bot,
+        guild: discord.Guild,
+        target: discord.Member,
+        requester: discord.abc.User,
+        current_tab: str = "avatar",
+        timeout: float = 120,
+    ):
+        super().__init__(
+            bot=bot,
+            user_id=requester.id,
+            color=BRAND_COLOR if current_tab == "avatar" else PURPLE_COLOR,
+            timeout=timeout,
         )
-        embed.set_image(url=self.user.display_avatar.url)
-        embed.set_footer(text=f"Requested by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
-        await interaction.response.edit_message(embed=embed, view=self)
+        self.guild = guild
+        self.target = target
+        self.requester = requester
+        self.current_tab = current_tab
+        self._build()
 
-    @discord.ui.button(label="Profile", style=discord.ButtonStyle.success, emoji="👤")
-    async def profile_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        try:
-            embed_color = int(self.bot.bot_config['ui_settings']['success_color'], 16)
-        except (KeyError, ValueError):
-            embed_color = discord.Color.green()
+    def _build(self):
+        self.clear_container()
+        u = self.target
+        avatar_url = str(u.display_avatar.with_size(1024).url)
 
-        embed = discord.Embed(
-            title=f"👤 {self.user.display_name}'s Profile",
-            color=embed_color
+        if self.current_tab == "avatar":
+            is_animated = u.display_avatar.is_animated()
+            formats = [
+                f"[PNG]({u.display_avatar.with_format('png').with_size(1024).url})",
+                f"[WebP]({u.display_avatar.with_format('webp').with_size(1024).url})",
+                f"[JPG]({u.display_avatar.with_format('jpeg').with_size(1024).url})",
+            ]
+            if is_animated:
+                formats.insert(0, f"[GIF]({u.display_avatar.with_format('gif').with_size(1024).url})")
+
+            header_text = (
+                f"# 🎲 {u.display_name}\n"
+                f"> `@{u.name}` · ID: `{u.id}`\n\n"
+                f"**High-Res Downloads (1024px):**\n"
+                f"{'  ·  '.join(formats)}"
+            )
+            self.add_section(header_text, thumbnail_url=avatar_url)
+
+        elif self.current_tab == "profile":
+            created_str = f"{ts_format(u.created_at, 'D')} ({ts_format(u.created_at, 'R')})"
+            joined_str = f"{ts_format(u.joined_at, 'D')} ({ts_format(u.joined_at, 'R')})" if u.joined_at else "Unknown"
+            top_role = u.top_role.mention if u.top_role.name != "@everyone" else "`None`"
+
+            profile_text = (
+                f"# 👤 {u.display_name} · Dossier\n"
+                f"> `@{u.name}` · Status: {status_badge(u.status)}\n\n"
+                f"• **Account Created:** {created_str}\n"
+                f"• **Joined Server:** {joined_str}\n"
+                f"• **Top Role:** {top_role} · Roles: `{len(u.roles) - 1}`"
+            )
+            self.add_section(profile_text, thumbnail_url=avatar_url)
+
+        self.add_footer(f"Requested by {self.requester.display_name} · Random Guild Explorer")
+
+        # Interactive controls
+        btn_reroll = discord.ui.Button(
+            label="Another",
+            emoji="🎲",
+            style=discord.ButtonStyle.primary,
         )
-        embed.add_field(name="Username", value=f"{self.user.name}#{self.user.discriminator}", inline=True)
-        embed.add_field(name="User ID", value=f"`{self.user.id}`", inline=True)
-        embed.add_field(name="Account Created", value=f"<t:{int(self.user.created_at.timestamp())}:R>", inline=True)
-        embed.set_thumbnail(url=self.user.display_avatar.url)
-        embed.set_footer(text=f"Requested by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
-        await interaction.response.edit_message(embed=embed, view=self)
+        btn_reroll.callback = self._on_reroll
 
-    @discord.ui.button(label="Download", style=discord.ButtonStyle.gray, emoji="💾")
-    async def download_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        try:
-            embed_color = int(self.bot.bot_config['ui_settings']['embed_color'], 16)
-        except (KeyError, ValueError):
-            embed_color = discord.Color.dark_gray()
-            
-        embed = discord.Embed(
-            title=f"💾 Download {self.user.display_name}'s Avatar",
-            color=embed_color,
-            description=f"[Click here to download 👆]({self.user.display_avatar.url})"
+        btn_avatar = discord.ui.Button(
+            label="Avatar",
+            emoji="🖼️",
+            style=discord.ButtonStyle.secondary if self.current_tab == "avatar" else discord.ButtonStyle.secondary,
+            disabled=(self.current_tab == "avatar"),
         )
-        embed.set_thumbnail(url=self.user.display_avatar.url)
-        embed.set_footer(text=f"Requested by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
-        await interaction.response.edit_message(embed=embed, view=self)
+        btn_avatar.callback = self._make_tab_callback("avatar")
 
-    async def on_timeout(self):
-        # Disable buttons and remove the view for a cleaner look
-        for item in self.children:
-            item.disabled = True
-        try:
-            await self.message.edit(view=None)
-        except discord.NotFound:
-            pass # Message might have been deleted
+        btn_profile = discord.ui.Button(
+            label="Profile",
+            emoji="👤",
+            style=discord.ButtonStyle.secondary,
+            disabled=(self.current_tab == "profile"),
+        )
+        btn_profile.callback = self._make_tab_callback("profile")
+
+        dismiss = DismissButton(user_id=self.requester.id)
+        self.add_row(btn_reroll, btn_avatar, btn_profile, dismiss)
+
+    def _make_tab_callback(self, tab: str):
+        async def callback(interaction: discord.Interaction):
+            self.current_tab = tab
+            self.container.accent_colour = BRAND_COLOR if tab == "avatar" else PURPLE_COLOR
+            self._build()
+            await interaction.response.edit_message(view=self)
+        return callback
+
+    async def _on_reroll(self, interaction: discord.Interaction):
+        members = [m for m in self.guild.members if not m.bot and m.id != self.target.id]
+        if not members:
+            members = [m for m in self.guild.members if not m.bot]
+        if not members:
+            await interaction.response.send_message("❌ No eligible members found.", ephemeral=True)
+            return
+
+        self.target = random.choice(members)
+        self._build()
+        await interaction.response.edit_message(view=self)
+
 
 class RandomAvatar(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.hybrid_command(name="randomavatar", description="Shows a random server member's avatar with fun buttons!",aliases=['rav'])
+    @commands.hybrid_command(
+        name="randomavatar",
+        description="🎲 Inspect a random member's avatar and profile with live re-roll",
+        aliases=["rav"],
+    )
     async def randomavatar(self, ctx: commands.Context):
-        # Use ctx.defer() for hybrid commands
-        await ctx.defer()
-        
-        # Get all non-bot members. Note: for larger servers, ctx.guild.members might not have all members cached.
+        if not ctx.guild:
+            await ctx.send("❌ This command must be used within a server.", ephemeral=True)
+            return
+
         members = [m for m in ctx.guild.members if not m.bot]
         if not members:
-            # ctx.reply() works for both slash and prefix commands
-            await ctx.reply("❌ I couldn't find any eligible members!", ephemeral=True)
+            await ctx.send("❌ Could not find any eligible server members.", ephemeral=True)
             return
-            
+
         user = random.choice(members)
-        
-        # Pass the bot object to the view
-        view = RandomAvatarView(user, self.bot)
-        
-        embed = discord.Embed(
-            title=f"🖼️ Random Avatar: {user.display_name}",
-            color=discord.Color.random() # Keeping this random is a nice touch for a random command!
-        )
-        embed.set_image(url=user.display_avatar.url)
-        embed.add_field(name="Tip", value="Use the buttons below for profile info and download options!", inline=False)
-        embed.set_footer(text=f"Requested by {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
-        
-        # Use ctx.send() for hybrid commands
-        message = await ctx.send(embed=embed, view=view)
-        # Store the message object in the view to edit it on timeout
-        view.message = message
+        view = RandomAvatarView(self.bot, ctx.guild, user, ctx.author)
+        await send_view(ctx, view)
+
 
 async def setup(bot):
     await bot.add_cog(RandomAvatar(bot))

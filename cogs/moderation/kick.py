@@ -1,16 +1,8 @@
 """
 cogs/moderation/kick.py
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Command: n!kick / /kick
-
-  Kicks a member from the server (they can rejoin).
-  Shows a clear confirmation embed — prevents accidental
-  kicks when people meant to use n!kicks (the fun gif command).
-
-Permissions required:
-  Bot  → Kick Members
-  User → Kick Members
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Interactive Components V2 Kick Command
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
 import logging
@@ -21,8 +13,14 @@ from discord import app_commands
 from discord.ext import commands
 
 from cogs.moderation.mod_utils import (
-    ConfirmView, can_action, dm_embed, mod_embed, try_dm,
+    ModActionView,
+    ModConfirmLayoutView,
+    can_action,
+    dm_embed,
+    log_mod_action,
+    try_dm,
 )
+from utils.ui import send_view
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +29,10 @@ class Kick(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    # ── /kick ─────────────────────────────────────────────────────────────────
-
-    @commands.hybrid_command(name="kick", description="Kick a member from the server (they can rejoin)")
+    @commands.hybrid_command(
+        name="kick",
+        description="👢 Kick a member from the server (removes them, but they may rejoin with an invite)",
+    )
     @app_commands.describe(
         member="The member to kick",
         reason="Reason for the kick (shown in audit log and DM)",
@@ -47,52 +46,58 @@ class Kick(commands.Cog):
         member: discord.Member,
         reason: Optional[str] = None,
     ):
-        # ── Safety checks ─────────────────────────────────────────────────────
+        # ── Hierarchy / Safety checks ─────────────────────────────────────────
         err = can_action(ctx.author, member)
         if err:
             return await ctx.send(err, ephemeral=True)
 
         reason_text = reason or "No reason provided."
+        details_text = "Target can rejoin if provided with an invite link."
 
-        # ── Confirmation embed ─────────────────────────────────────────────────
-        # Extra note clarifying this is the MOD kick, not n!kicks (gif command)
-        confirm_embed = discord.Embed(
-            title="👢 Confirm Kick",
-            description=(
-                f"Are you sure you want to **kick** {member.mention}?\n\n"
-                f"> They will be removed from the server but **can rejoin** with an invite.\n\n"
-                f"**User:** `{member}` ({member.id})\n"
-                f"**Reason:** {reason_text}\n\n"
-                f"⚠️ **Looking for the gif command?** Use `n!kicks` instead.\n"
-                f"This is the **moderation kick** — it removes the user from the server."
-            ),
-            color=discord.Color.from_rgb(220, 160, 50),
+        # ── Interactive Components V2 Confirmation ─────────────────────────────
+        confirm_view = ModConfirmLayoutView(
+            action="kick",
+            target=member,
+            moderator=ctx.author,
+            reason=reason_text,
+            details=details_text,
+            timeout=30.0,
         )
-        confirm_embed.set_thumbnail(url=member.display_avatar.url)
-        confirm_embed.set_footer(text="This action will expire in 30 seconds if not confirmed.")
+        msg = await send_view(ctx, confirm_view)
+        await confirm_view.wait()
 
-        view = ConfirmView(ctx.author.id)
-        msg  = await ctx.send(embed=confirm_embed, view=view)
-        await view.wait()
-
-        if not view.confirmed:
-            cancelled = discord.Embed(
-                description="❌ **Kick cancelled.**",
-                color=discord.Color.greyple(),
-            )
-            return await msg.edit(embed=cancelled, view=view)
+        if not confirm_view.confirmed:
+            return
 
         # ── DM target before kicking ───────────────────────────────────────────
         await try_dm(member, dm_embed("kick", ctx.guild, ctx.author, reason_text))
 
-        # ── Execute ────────────────────────────────────────────────────────────
+        # ── Execute Kick ───────────────────────────────────────────────────────
         await member.kick(reason=f"[{ctx.author}] {reason_text}")
 
-        result_embed = mod_embed("kick", member, ctx.author, reason_text)
-        await msg.edit(embed=result_embed, view=view)
-        logger.info("Kick: %s kicked %s | reason: %s", ctx.author, member, reason_text)
+        result_view = ModActionView(
+            action="kick",
+            target=member,
+            moderator=ctx.author,
+            reason=reason_text,
+        )
+        if msg:
+            try:
+                await msg.edit(view=result_view)
+            except Exception:
+                await ctx.send(view=result_view)
+        else:
+            await ctx.send(view=result_view)
 
-    # ── Error handler ──────────────────────────────────────────────────────────
+        await log_mod_action(
+            ctx.guild,
+            "kick",
+            member,
+            ctx.author,
+            reason_text,
+            bot=self.bot,
+        )
+        logger.info("Kick: %s kicked %s | reason: %s", ctx.author, member, reason_text)
 
     @kick.error
     async def kick_error(self, ctx: commands.Context, error):
@@ -108,4 +113,3 @@ class Kick(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Kick(bot))
-    logger.info("Loaded Kick")

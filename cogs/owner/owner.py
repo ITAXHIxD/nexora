@@ -20,7 +20,7 @@ class Owner(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.hybrid_command(name="debug_commands", description="List all registered commands.",aliases=['debug'])
+    @commands.command(name="debug_commands", aliases=['debug'])
     @is_owner()
     async def debug_commands(self, ctx: commands.Context):
         commands_list = [cmd.name for cmd in self.bot.tree.get_commands()]
@@ -35,7 +35,8 @@ class Owner(commands.Cog):
             description=f"Found {len(commands_list)} commands:\n" + "\n".join(commands_list),
             color=embed_color
         )
-        await ctx.send(embed=embed, ephemeral=True)
+        await ctx.send(embed=embed)
+
     @commands.command()
     @commands.is_owner()
     async def activate(self, ctx, guild_id: str, tier: str):
@@ -45,25 +46,22 @@ class Owner(commands.Cog):
         self._save_data(data)
         await ctx.send(f"✅ **{tier}** activated for {guild_id}")
 
-    @commands.hybrid_command(name="force_resync", description="Force resync all commands.")
+    @commands.command(name="force_resync")
     @is_owner()
     async def force_resync(self, ctx: commands.Context):
-        await ctx.defer(ephemeral=True)
         try:
             guild_synced = await self.bot.tree.sync(guild=ctx.guild)
             global_synced = await self.bot.tree.sync()
             
-            await ctx.followup.send(
-                f"✅ Resynced!\nGuild: {len(guild_synced)} commands\nGlobal: {len(global_synced)} commands", 
-                ephemeral=True
+            await ctx.send(
+                f"✅ Resynced!\nGuild: {len(guild_synced)} commands\nGlobal: {len(global_synced)} commands"
             )
         except Exception as e:
-            await ctx.followup.send(f"❌ Resync failed: {e}", ephemeral=True)
+            await ctx.send(f"❌ Resync failed: {e}")
 
-    @commands.hybrid_command(name="backup", description="Create a backup of bot stats.")
+    @commands.command(name="backup")
     @is_owner()
     async def backup(self, ctx: commands.Context):
-        await ctx.defer(ephemeral=True)
         backup_data = {
             'stats': self.bot.bot_stats,
             'timestamp': datetime.now().isoformat(),
@@ -74,9 +72,9 @@ class Owner(commands.Cog):
         data_bytes = json.dumps(backup_data, indent=2, ensure_ascii=False).encode('utf-8')
         file = discord.File(io.BytesIO(data_bytes), filename=filename)
         
-        await ctx.followup.send("✅ Backup Created!", file=file, ephemeral=True)
+        await ctx.send("✅ Backup Created!", file=file)
 
-    @commands.hybrid_command(name="resetstats", description="Reset bot statistics.")
+    @commands.command(name="resetstats")
     @is_owner()
     async def resetstats(self, ctx: commands.Context):
         self.bot.bot_stats = {
@@ -93,16 +91,11 @@ class Owner(commands.Cog):
             embed_color = 0x00ff00
 
         embed = discord.Embed(title="✅ Statistics Reset", description="Bot statistics have been reset.", color=embed_color)
-        await ctx.send(embed=embed, ephemeral=True)
+        await ctx.send(embed=embed)
 
-    @commands.hybrid_command(name="sync", description="Sync slash commands globally.")
+    @commands.command(name="sync")
     @commands.is_owner()
-    @app_commands.describe(guild_id="Optional: Sync to a specific guild ID for testing.")
     async def sync(self, ctx: commands.Context, guild_id: str = None):
-        # Check if it's a slash command interaction
-        if ctx.interaction:
-            await ctx.defer(ephemeral=True)
-        
         try:
             if guild_id:
                 guild_obj = discord.Object(id=int(guild_id))
@@ -112,21 +105,20 @@ class Owner(commands.Cog):
                 synced = await self.bot.tree.sync()
                 message = f"✅ Synced {len(synced)} commands globally."
             
-            await ctx.send(message, ephemeral=True if ctx.interaction else False)
+            await ctx.send(message)
         except Exception as e:
-            await ctx.send(f"❌ Sync failed: {e}", ephemeral=True if ctx.interaction else False)
+            await ctx.send(f"❌ Sync failed: {e}")
     
-    @commands.hybrid_command(name="unsync", description="Clear all slash commands.")
+    @commands.command(name="unsync")
     @is_owner()
     async def unsync(self, ctx: commands.Context):
-        await ctx.defer(ephemeral=True)
         try:
             self.bot.tree.clear_commands(guild=None)
             await self.bot.tree.sync()
             
-            await ctx.followup.send("✅ All global slash commands have been cleared.", ephemeral=True)
+            await ctx.send("✅ All global slash commands have been cleared.")
         except Exception as e:
-            await ctx.followup.send(f"❌ Unsync failed: {e}", ephemeral=True)
+            await ctx.send(f"❌ Unsync failed: {e}")
 
 
 async def setup(bot):

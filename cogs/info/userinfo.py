@@ -1,39 +1,166 @@
-import discord
-from discord.ext import commands
-from discord import app_commands
-from datetime import datetime
+"""
+cogs/info/userinfo.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Interactive Components V2 Member Profile Dossier
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+
 import logging
+from typing import Optional
+
+import discord
+from discord import app_commands
+from discord.ext import commands
+
+from utils.ui import (
+    BRAND_COLOR,
+    NexoraView,
+    DismissButton,
+    status_badge,
+    send_view,
+    ts_format,
+)
+
 logger = logging.getLogger(__name__)
+
+
+class UserInfoView(NexoraView):
+    """Components V2 member dossier card with roles and permissions."""
+
+    def __init__(
+        self,
+        target: discord.Member,
+        requester: discord.abc.User,
+        timeout: float = 180,
+    ):
+        color = target.color.value if target.color.value else BRAND_COLOR
+        super().__init__(user_id=requester.id, color=color, timeout=timeout)
+        self.target = target
+        self.requester = requester
+        self._build()
+
+    def _build(self):
+        self.clear_container()
+        u = self.target
+
+        # Badges & Flags
+        badges = []
+        if u.id == u.guild.owner_id:
+            badges.append("👑 **Owner**")
+        if u.guild_permissions.administrator:
+            badges.append("🛡️ **Admin**")
+        if u.premium_since:
+            badges.append("💎 **Booster**")
+        if u.bot:
+            badges.append("🤖 **Bot**")
+        badge_line = " · ".join(badges) if badges else "👤 **Member**"
+
+        # Roles
+        guild_roles = [r for r in u.roles if r.name != "@everyone"]
+        guild_roles.reverse()  # Highest first
+        roles_mentions = [r.mention for r in guild_roles[:12]]
+        roles_str = ", ".join(roles_mentions) if roles_mentions else "None"
+        if len(guild_roles) > 12:
+            roles_str += f" *(+{len(guild_roles) - 12} more)*"
+
+        # Key Permissions
+        key_perms = []
+        p = u.guild_permissions
+        if p.administrator:
+            key_perms.append("Administrator")
+        if p.manage_guild:
+            key_perms.append("Manage Server")
+        if p.manage_roles:
+            key_perms.append("Manage Roles")
+        if p.manage_channels:
+            key_perms.append("Manage Channels")
+        if p.ban_members:
+            key_perms.append("Ban Members")
+        if p.kick_members:
+            key_perms.append("Kick Members")
+        if p.manage_messages:
+            key_perms.append("Manage Messages")
+        perms_str = " · ".join(f"`{k}`" for k in key_perms[:6]) if key_perms else "`Standard Member`"
+
+        # ── Header Section ────────────────────────────────────────────────────
+        header_text = (
+            f"# {u.display_name}\n"
+            f"> `@{u.name}` · ID: `{u.id}`\n"
+            f"{badge_line} · {status_badge(u.status)}"
+        )
+        avatar_url = str(u.display_avatar.url)
+        self.add_section(header_text, thumbnail_url=avatar_url)
+        self.add_separator(discord.SeparatorSpacing.small)
+
+        # ── Dates & Timestamps Block ──────────────────────────────────────────
+        created_str = f"{ts_format(u.created_at, 'D')} ({ts_format(u.created_at, 'R')})"
+        joined_str = (
+            f"{ts_format(u.joined_at, 'D')} ({ts_format(u.joined_at, 'R')})"
+            if u.joined_at
+            else "Unknown"
+        )
+        dates_block = (
+            "### 📅 Timeline\n"
+            f"• **Account Created:** {created_str}\n"
+            f"• **Joined Server:** {joined_str}"
+        )
+        self.add_text(dates_block)
+        self.add_separator(discord.SeparatorSpacing.small)
+
+        # ── Roles & Key Permissions Block ─────────────────────────────────────
+        top_role = u.top_role.mention if u.top_role.name != "@everyone" else "None"
+        roles_block = (
+            "### 🎭 Roles & Permissions\n"
+            f"• **Top Role:** {top_role} · **Total:** `{len(guild_roles)}`\n"
+            f"• **Key Perms:** {perms_str}\n"
+            f"• **Assigned Roles:**\n  {roles_str}"
+        )
+        self.add_text(roles_block)
+
+        # ── Footer ────────────────────────────────────────────────────────────
+        self.add_footer(f"Requested by {self.requester.display_name}")
+
+        # ── Interactive Buttons ───────────────────────────────────────────────
+        buttons = [
+            discord.ui.Button(
+                label="Avatar",
+                emoji="🖼️",
+                style=discord.ButtonStyle.link,
+                url=u.display_avatar.url,
+            )
+        ]
+        if hasattr(u, "banner") and u.banner:
+            buttons.append(
+                discord.ui.Button(
+                    label="Banner",
+                    emoji="🌆",
+                    style=discord.ButtonStyle.link,
+                    url=u.banner.url,
+                )
+            )
+
+        buttons.append(DismissButton(user_id=self.requester.id))
+        self.add_row(*buttons)
+
+
 class UserInfo(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.hybrid_command(name="userinfo", description="View user information",aliases=['ui'])
-    @app_commands.describe(user="User to inspect (optional)")
-    async def userinfo(self, ctx: commands.Context, user: discord.Member = None):
+    @commands.hybrid_command(
+        name="userinfo",
+        description="👤 View detailed user dossier, roles, and permissions",
+        aliases=["ui"],
+    )
+    @app_commands.describe(user="User to inspect (defaults to yourself)")
+    async def userinfo(self, ctx: commands.Context, user: Optional[discord.Member] = None):
         target = user or ctx.author
+        if not isinstance(target, discord.Member) and ctx.guild:
+            target = ctx.guild.get_member(target.id) or target
 
-        roles = [r.mention for r in target.roles if r.name != "@everyone"]
-        roles_text = ", ".join(roles[:10]) if roles else "None"
-        if len(roles) > 10:
-            roles_text += f" (+{len(roles)-10} more)"
+        view = UserInfoView(target, ctx.author)
+        await send_view(ctx, view)
 
-        embed = discord.Embed(
-            title=target.display_name,
-            description=f"User info for {target.mention}",
-            color=target.color if target.color.value else 0x5DADE2,
-            timestamp=datetime.now()
-        )
-        if target.avatar:
-            embed.set_thumbnail(url=target.avatar.url)
-        embed.add_field(name="Username", value=target.name, inline=True)
-        embed.add_field(name="ID", value=str(target.id), inline=True)
-        embed.add_field(name="Bot", value="Yes" if target.bot else "No", inline=True)
-        embed.add_field(name="Account Created", value=target.created_at.strftime('%Y-%m-%d'), inline=True)
-        embed.add_field(name="Joined Server", value=target.joined_at.strftime('%Y-%m-%d') if target.joined_at else "Unknown", inline=True)
-        embed.add_field(name=f"Roles ({len(target.roles)-1})", value=roles_text, inline=False)
-        await ctx.send(embed=embed)
 
 async def setup(bot):
     await bot.add_cog(UserInfo(bot))
-

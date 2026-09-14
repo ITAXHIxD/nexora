@@ -1,20 +1,27 @@
-# cogs/fun/owo_base.py
+"""
+cogs/fun/actions.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Nexora Fun Actions Engine · Powered by Discord Components V2
+Provides interactive, responsive action cards for hug, slap, kiss,
+cuddle, bonk, bite, poke, blush, kick, kill, pat, punch, and boop.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
 
 import discord
 from discord.ext import commands
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 import random
 import json
 import os
+import logging
+
+from utils.ui import NexoraView, DismissButton, send_view, BRAND_COLOR
+
+logger = logging.getLogger(__name__)
 
 GIF_FOLDER = "data/owo_gifs"
 
-# Per-action style presets:
-#  - emoji: big icon in header
-#  - label: action name in header
-#  - color: embed color
-STYLE_PRESETS = {}
-STYLE_PRESETS.update({
+STYLE_PRESETS = {
     "hug": {
         "emoji": "🤗",
         "label": "Hug",
@@ -57,7 +64,12 @@ STYLE_PRESETS.update({
     },
     "kick": {
         "emoji": "🦵",
-        "label": "Kicks",
+        "label": "Kick",
+        "color": discord.Color.from_rgb(255, 200, 100),
+    },
+    "kicks": {
+        "emoji": "🦵",
+        "label": "Kick",
         "color": discord.Color.from_rgb(255, 200, 100),
     },
     "kill": {
@@ -65,9 +77,22 @@ STYLE_PRESETS.update({
         "label": "Kill",
         "color": discord.Color.from_rgb(200, 50, 50),
     },
-
-})
-
+    "kiss": {
+        "emoji": "💋",
+        "label": "Kiss",
+        "color": discord.Color.from_rgb(255, 105, 180),
+    },
+    "pat": {
+        "emoji": "🐱",
+        "label": "Pat",
+        "color": discord.Color.from_rgb(135, 206, 235),
+    },
+    "punch": {
+        "emoji": "👊",
+        "label": "Punch",
+        "color": discord.Color.from_rgb(255, 69, 0),
+    },
+}
 
 
 def load_gif_list(action_key: str) -> List[str]:
@@ -75,20 +100,125 @@ def load_gif_list(action_key: str) -> List[str]:
     file_path = os.path.join(GIF_FOLDER, f"{action_key}.json")
 
     if not os.path.exists(file_path):
-        print(f"[WARN] No GIF file for action '{action_key}': {file_path}")
+        logger.warning("No GIF file for action '%s': %s", action_key, file_path)
         return []
 
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            # We expect a simple list of URLs
             if isinstance(data, list):
                 return data
-            print(f"[WARN] GIF file for '{action_key}' is not a list.")
+            logger.warning("GIF file for '%s' is not a list.", action_key)
             return []
     except Exception as e:
-        print(f"[ERROR] Failed to read {file_path}: {e}")
+        logger.error("Failed to read %s: %s", file_path, e)
         return []
+
+
+class ActionLayoutView(NexoraView):
+    """Components V2 LayoutView for dynamic OwO action cards."""
+
+    def __init__(
+        self,
+        *,
+        author: discord.Member,
+        target: discord.Member,
+        action_key: str,
+        emoji: str,
+        label: str,
+        desc: str,
+        gif_url: Optional[str] = None,
+        color: int = BRAND_COLOR,
+        timeout: float = 120,
+    ):
+        super().__init__(user_id=author.id, color=color, timeout=timeout)
+        self.author = author
+        self.target = target
+        self.action_key = action_key
+        self.emoji = emoji
+        self.label = label
+        self.desc = desc
+        self.gif_url = gif_url
+        self._build()
+
+    def _build(self):
+        self.clear_container()
+
+        # Header Section with author avatar
+        if self.author.id != self.target.id:
+            sub = f"> {self.author.mention} ➔ {self.target.mention}"
+        else:
+            sub = f"> {self.author.mention} *(self-interaction)*"
+
+        header_text = f"# {self.emoji} {self.label}\n{sub}"
+        thumb_url = str(self.author.display_avatar.url)
+        self.add_section(header_text, thumbnail_url=thumb_url)
+        self.add_separator(discord.SeparatorSpacing.small)
+
+        # Narrative text
+        self.add_text(f"### {self.desc}")
+
+        # Media Gallery GIF
+        if self.gif_url:
+            try:
+                self.container.add_item(
+                    discord.ui.MediaGallery(
+                        discord.MediaGalleryItem(self.gif_url)
+                    )
+                )
+            except Exception as exc:
+                logger.warning("Could not attach MediaGallery GIF: %s", exc)
+
+        # Footer
+        self.add_footer("Nexora Actions · Stay cute, not toxic (uwu)")
+
+        # Action Buttons
+        row = discord.ui.ActionRow()
+        if self.author.id != self.target.id:
+            return_btn = discord.ui.Button(
+                label=f"{self.label} Back!",
+                emoji=self.emoji,
+                style=discord.ButtonStyle.secondary,
+            )
+            return_btn.callback = self._on_return_action
+            row.add_item(return_btn)
+
+        row.add_item(DismissButton(user_id=self.author.id))
+        self.container.add_item(row)
+
+    async def _on_return_action(self, interaction: discord.Interaction):
+        if interaction.user.id != self.target.id:
+            await interaction.response.send_message(
+                f"❌ Only {self.target.display_name} can return this {self.label.lower()}!",
+                ephemeral=True,
+            )
+            return
+
+        # Disable return button on the original card
+        for item in self.container.children:
+            if isinstance(item, discord.ui.ActionRow):
+                for child in item.children:
+                    if isinstance(child, discord.ui.Button) and child.label == f"{self.label} Back!":
+                        child.disabled = True
+                        child.label = f"Returned by {self.target.display_name} 💕"
+
+        await interaction.response.edit_message(view=self)
+
+        # Send reciprocal card
+        gifs = load_gif_list(self.action_key)
+        new_gif = random.choice(gifs) if gifs else None
+
+        return_view = ActionLayoutView(
+            author=self.target,
+            target=self.author,
+            action_key=self.action_key,
+            emoji=self.emoji,
+            label=f"{self.label} Back",
+            desc=f"**{self.target.display_name}** warmly returned the {self.label.lower()} to **{self.author.display_name}**! 💞",
+            gif_url=new_gif,
+            color=self._color,
+        )
+        await interaction.followup.send(view=return_view)
 
 
 async def send_owo_action_embed(
@@ -100,26 +230,27 @@ async def send_owo_action_embed(
     self_template: Optional[str] = None,
     extra_note: Optional[str] = None,
     color: Optional[discord.Color] = None,
-    action_emoji: Optional[str] = None,   # <- NEW
-    action_label: Optional[str] = None,   # <- NEW
+    action_emoji: Optional[str] = None,
+    action_label: Optional[str] = None,
 ):
     """
-    Generic OwO-style embed builder.
-
-    text_template: used when author != target.
-    self_template: used when author == target.
-    action_key: used for presets + GIF file name.
+    Modern Components V2 Action card dispatcher.
+    Upgrades all 13 fun action commands from legacy discord.Embed to Components V2.
     """
-
     author: discord.Member = ctx.author
 
-    # ------- Styling from presets -------
     preset = STYLE_PRESETS.get(action_key, {})
-    emoji: str = action_emoji or preset.get("emoji", "💚")
+    emoji: str = action_emoji or preset.get("emoji", "✨")
     label: str = action_label or preset.get("label", action_key.capitalize())
-    color: discord.Color = color or preset.get("color", discord.Color.blurple())
 
-    # ------- Text logic -------
+    col = color or preset.get("color", BRAND_COLOR)
+    if isinstance(col, discord.Color):
+        color_val = col.value
+    elif isinstance(col, int):
+        color_val = col
+    else:
+        color_val = BRAND_COLOR
+
     if target.id == author.id:
         if self_template:
             desc = self_template.format(author=author.display_name)
@@ -131,29 +262,23 @@ async def send_owo_action_embed(
     else:
         desc = text_template.format(
             author=author.display_name,
-            target=target.display_name
+            target=target.display_name,
         )
 
     if extra_note:
         desc += f"\n\n{extra_note}"
 
-    # OwO frame
-    header_line = f"{emoji} {label}"
-    sub_line = f"{author.display_name} → {target.display_name}"
-
-    framed_header = (
-        f"╭─ {header_line}\n"
-        f"╰─ {sub_line}\n\n"
-    )
-
-    embed = discord.Embed(
-        description=framed_header + desc,
-        color=color,
-    )
-
     gifs = load_gif_list(action_key)
-    if gifs:
-        embed.set_image(url=random.choice(gifs))
+    gif_url = random.choice(gifs) if gifs else None
 
-    embed.set_footer(text="nexora actions • stay cute, not toxic (uwu)")
-    await ctx.send(embed=embed)
+    view = ActionLayoutView(
+        author=author,
+        target=target,
+        action_key=action_key,
+        emoji=emoji,
+        label=label,
+        desc=desc,
+        gif_url=gif_url,
+        color=color_val,
+    )
+    await send_view(ctx, view)

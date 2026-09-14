@@ -1,273 +1,272 @@
+"""
+utils/error_handler.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Interactive Components V2 Error Handler for Prefix & Slash Commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+
+import logging
+import sys
+import traceback
+from datetime import datetime
+from typing import Optional, Union
+
 import discord
 from discord.ext import commands
-import traceback
-import sys
-import logging
-from datetime import datetime
+
+from utils.ui import (
+    ERROR_COLOR,
+    WARNING_COLOR,
+    NexoraView,
+    DismissButton,
+    send_view,
+)
 
 logger = logging.getLogger(__name__)
 
 
+class ErrorCardView(NexoraView):
+    """Sleek Components V2 card for command errors, cooldowns, and permission notices."""
+
+    def __init__(
+        self,
+        title: str,
+        description: str,
+        error_type: Optional[str] = None,
+        color: int = ERROR_COLOR,
+        timeout: float = 60.0,
+    ):
+        super().__init__(color=color, timeout=timeout)
+        self.title = title
+        self.description = description
+        self.error_type = error_type
+        self._build()
+
+    def _build(self):
+        self.clear_container()
+        header = f"# ❌ {self.title}"
+        self.add_text(header)
+        self.add_separator(discord.SeparatorSpacing.small)
+
+        body = f"{self.description}"
+        if self.error_type:
+            body += f"\n\n-# Error Category: `{self.error_type}`"
+        self.add_text(body)
+
+        dismiss = DismissButton()
+        self.add_row(dismiss)
+
+
 class ErrorHandler(commands.Cog):
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
         bot.tree.on_error = self.on_app_command_error
-    
-    def create_error_embed(self, title: str, description: str, error_type: str = None) -> discord.Embed:
-        """Create a standardized error embed"""
-        embed = discord.Embed(
-            title=f"❌ {title}",
-            description=description,
-            color=discord.Color.red(),
-            timestamp=datetime.now()
-        )
-        if error_type:
-            embed.set_footer(text=f"Error Type: {error_type}")
-        return embed
-    
-    async def send_error(self, ctx_or_interaction, embed: discord.Embed):
-        """Send error message to user"""
+
+    def create_error_view(
+        self,
+        title: str,
+        description: str,
+        error_type: Optional[str] = None,
+        color: int = ERROR_COLOR,
+    ) -> ErrorCardView:
+        return ErrorCardView(title=title, description=description, error_type=error_type, color=color)
+
+    async def send_error(
+        self,
+        target: Union[commands.Context, discord.Interaction],
+        view: ErrorCardView,
+    ):
         try:
-            if isinstance(ctx_or_interaction, commands.Context):
-                await ctx_or_interaction.send(embed=embed, ephemeral=True)
-            elif isinstance(ctx_or_interaction, discord.Interaction):
-                if ctx_or_interaction.response.is_done():
-                    await ctx_or_interaction.followup.send(embed=embed, ephemeral=True)
-                else:
-                    await ctx_or_interaction.response.send_message(embed=embed, ephemeral=True)
-        except:
-            pass
-    
+            await send_view(target, view, ephemeral=True)
+        except Exception as exc:
+            logger.error("Failed to send error view: %s", exc)
+
     @commands.Cog.listener()
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
-        """Handle errors for prefix commands"""
-        
-        # Ignore if command has local error handler
-        if hasattr(ctx.command, 'on_error'):
+        """Handle errors for prefix commands."""
+        if hasattr(ctx.command, "on_error"):
             return
-        
-        # Get the original error
-        error = getattr(error, 'original', error)
-        
-        # Command not found - ignore silently
+
+        error = getattr(error, "original", error)
+
         if isinstance(error, commands.CommandNotFound):
             return
-        
-        # Missing permissions
+
         elif isinstance(error, commands.MissingPermissions):
-            missing_perms = ", ".join([f"`{perm}`" for perm in error.missing_permissions])
-            embed = self.create_error_embed(
+            missing_perms = " · ".join([f"`{perm}`" for perm in error.missing_permissions])
+            view = self.create_error_view(
                 "Missing Permissions",
-                f"You need the following permissions to use this command:\n{missing_perms}",
-                "MissingPermissions"
+                f"> You lack required permissions to execute `{ctx.command}`.\n\n"
+                f"**Required:** {missing_perms}",
+                "MissingPermissions",
             )
-            await self.send_error(ctx, embed)
-        
-        # Bot missing permissions
+            await self.send_error(ctx, view)
+
         elif isinstance(error, commands.BotMissingPermissions):
-            missing_perms = ", ".join([f"`{perm}`" for perm in error.missing_permissions])
-            embed = self.create_error_embed(
+            missing_perms = " · ".join([f"`{perm}`" for perm in error.missing_permissions])
+            view = self.create_error_view(
                 "Bot Missing Permissions",
-                f"I need the following permissions to execute this command:\n{missing_perms}\n\nPlease ask a server administrator to grant these permissions.",
-                "BotMissingPermissions"
+                f"> Nexora lacks permissions to complete this action.\n\n"
+                f"**Please grant:** {missing_perms}",
+                "BotMissingPermissions",
             )
-            await self.send_error(ctx, embed)
-        
-        # Missing required argument
+            await self.send_error(ctx, view)
+
         elif isinstance(error, commands.MissingRequiredArgument):
-            embed = self.create_error_embed(
+            view = self.create_error_view(
                 "Missing Argument",
-                f"You're missing the required argument: `{error.param.name}`\n\nUsage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`",
-                "MissingRequiredArgument"
+                f"> Missing required parameter: `{error.param.name}`\n\n"
+                f"**Usage:** `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`",
+                "MissingRequiredArgument",
             )
-            await self.send_error(ctx, embed)
-        
-        # Bad argument
+            await self.send_error(ctx, view)
+
         elif isinstance(error, commands.BadArgument):
-            embed = self.create_error_embed(
+            view = self.create_error_view(
                 "Invalid Argument",
-                f"Invalid argument provided: {str(error)}\n\nUsage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`",
-                "BadArgument"
+                f"> {str(error)}\n\n"
+                f"**Usage:** `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`",
+                "BadArgument",
             )
-            await self.send_error(ctx, embed)
-        
-        # Command on cooldown
+            await self.send_error(ctx, view)
+
         elif isinstance(error, commands.CommandOnCooldown):
-            embed = self.create_error_embed(
+            view = self.create_error_view(
                 "Command On Cooldown",
-                f"This command is on cooldown. Try again in **{error.retry_after:.1f}** seconds.",
-                "CommandOnCooldown"
+                f"> Please slow down! You can use `{ctx.command}` again in **{error.retry_after:.1f}s**.",
+                "CommandOnCooldown",
+                color=WARNING_COLOR,
             )
-            await self.send_error(ctx, embed)
-        
-        # Not owner
+            await self.send_error(ctx, view)
+
         elif isinstance(error, commands.NotOwner):
-            embed = self.create_error_embed(
-                "Owner Only",
-                "This command can only be used by the bot owner.",
-                "NotOwner"
+            view = self.create_error_view(
+                "Owner Restricted",
+                "> This command is restricted to the bot owner.",
+                "NotOwner",
             )
-            await self.send_error(ctx, embed)
-        
-        # Check failure
+            await self.send_error(ctx, view)
+
         elif isinstance(error, commands.CheckFailure):
-            embed = self.create_error_embed(
-                "Check Failed",
-                "You don't have permission to use this command.",
-                "CheckFailure"
+            view = self.create_error_view(
+                "Access Denied",
+                "> You do not meet the criteria or permissions to run this command.",
+                "CheckFailure",
             )
-            await self.send_error(ctx, embed)
-        
-        # Disabled command
-        elif isinstance(error, commands.DisabledCommand):
-            embed = self.create_error_embed(
-                "Command Disabled",
-                f"The command `{ctx.command}` is currently disabled.",
-                "DisabledCommand"
-            )
-            await self.send_error(ctx, embed)
-        
-        # Discord HTTP exception
-        elif isinstance(error, discord.HTTPException):
-            embed = self.create_error_embed(
-                "Discord API Error",
-                f"An error occurred while communicating with Discord: {str(error)}",
-                "HTTPException"
-            )
-            await self.send_error(ctx, embed)
-        
-        # Forbidden (403)
+            await self.send_error(ctx, view)
+
         elif isinstance(error, discord.Forbidden):
-            embed = self.create_error_embed(
-                "Permission Denied",
-                "I don't have permission to perform this action. Please check my role permissions and position in the role hierarchy.",
-                "Forbidden"
+            view = self.create_error_view(
+                "Permission Denied by Discord",
+                "> I do not have permission to perform this action. Check role hierarchy and channel permissions.",
+                "Forbidden",
             )
-            await self.send_error(ctx, embed)
-        
-        # Not found (404)
-        elif isinstance(error, discord.NotFound):
-            embed = self.create_error_embed(
-                "Not Found",
-                "The requested resource was not found. It may have been deleted.",
-                "NotFound"
-            )
-            await self.send_error(ctx, embed)
-        
-        # Generic error
+            await self.send_error(ctx, view)
+
         else:
-            embed = self.create_error_embed(
+            view = self.create_error_view(
                 "Unexpected Error",
-                f"An unexpected error occurred while executing the command.\n\n``````",
-                type(error).__name__
+                f"> An unexpected error occurred while running `{ctx.command}`.\n"
+                f"```py\n{str(error)[:300]}\n```",
+                type(error).__name__,
             )
-            await self.send_error(ctx, embed)
-            
-            # Log full traceback
-            logger.error(f"Unhandled error in command {ctx.command}:")
+            await self.send_error(ctx, view)
+            logger.error("Unhandled error in command %s:", ctx.command)
             traceback.print_exception(type(error), error, error.__traceback__, file=sys.stderr)
-    
+
+            if hasattr(self.bot, "send_support_log"):
+                try:
+                    await self.bot.send_support_log(
+                        title="⚠️ Unhandled Prefix Command Error",
+                        description=f"Command `{ctx.command}` failed during execution.",
+                        color=ERROR_COLOR,
+                        fields=[
+                            {"name": "Command", "value": f"`{ctx.command}`", "inline": True},
+                            {"name": "Author", "value": f"{ctx.author} (`{ctx.author.id}`)", "inline": True},
+                            {"name": "Server", "value": f"{ctx.guild.name if ctx.guild else 'DMs'} (`{ctx.guild.id if ctx.guild else 'N/A'}`)", "inline": True},
+                            {"name": "Exception", "value": f"```{type(error).__name__}: {str(error)[:250]}```", "inline": False},
+                        ],
+                    )
+                except Exception as exc:
+                    logger.debug("Error sending support log: %s", exc)
+
     async def on_app_command_error(self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
-        """Handle errors for slash commands"""
-        
-        # Get the original error
-        error = getattr(error, 'original', error)
-        
-        # Missing permissions
+        """Handle errors for slash commands."""
+        error = getattr(error, "original", error)
+
         if isinstance(error, discord.app_commands.MissingPermissions):
-            missing_perms = ", ".join([f"`{perm}`" for perm in error.missing_permissions])
-            embed = self.create_error_embed(
+            missing_perms = " · ".join([f"`{perm}`" for perm in error.missing_permissions])
+            view = self.create_error_view(
                 "Missing Permissions",
-                f"You need the following permissions to use this command:\n{missing_perms}",
-                "MissingPermissions"
+                f"> You lack required permissions to run this command.\n\n"
+                f"**Required:** {missing_perms}",
+                "MissingPermissions",
             )
-            await self.send_error(interaction, embed)
-        
-        # Bot missing permissions
+            await self.send_error(interaction, view)
+
         elif isinstance(error, discord.app_commands.BotMissingPermissions):
-            missing_perms = ", ".join([f"`{perm}`" for perm in error.missing_permissions])
-            embed = self.create_error_embed(
+            missing_perms = " · ".join([f"`{perm}`" for perm in error.missing_permissions])
+            view = self.create_error_view(
                 "Bot Missing Permissions",
-                f"I need the following permissions to execute this command:\n{missing_perms}\n\nPlease ask a server administrator to grant these permissions.",
-                "BotMissingPermissions"
+                f"> Nexora lacks required permissions in this server/channel.\n\n"
+                f"**Please grant:** {missing_perms}",
+                "BotMissingPermissions",
             )
-            await self.send_error(interaction, embed)
-        
-        # Command on cooldown
+            await self.send_error(interaction, view)
+
         elif isinstance(error, discord.app_commands.CommandOnCooldown):
-            embed = self.create_error_embed(
+            view = self.create_error_view(
                 "Command On Cooldown",
-                f"This command is on cooldown. Try again in **{error.retry_after:.1f}** seconds.",
-                "CommandOnCooldown"
+                f"> Please wait **{error.retry_after:.1f}s** before using this command again.",
+                "CommandOnCooldown",
+                color=WARNING_COLOR,
             )
-            await self.send_error(interaction, embed)
-        
-        # Check failure
+            await self.send_error(interaction, view)
+
         elif isinstance(error, discord.app_commands.CheckFailure):
-            embed = self.create_error_embed(
-                "Check Failed",
-                "You don't have permission to use this command.",
-                "CheckFailure"
+            view = self.create_error_view(
+                "Access Denied",
+                "> You do not meet the permission criteria to execute this command.",
+                "CheckFailure",
             )
-            await self.send_error(interaction, embed)
-        
-        # Discord HTTP exception
-        elif isinstance(error, discord.HTTPException):
-            embed = self.create_error_embed(
-                "Discord API Error",
-                f"An error occurred while communicating with Discord: {str(error)}",
-                "HTTPException"
-            )
-            await self.send_error(interaction, embed)
-        
-        # Forbidden (403)
+            await self.send_error(interaction, view)
+
         elif isinstance(error, discord.Forbidden):
-            embed = self.create_error_embed(
+            view = self.create_error_view(
                 "Permission Denied",
-                "I don't have permission to perform this action. Please check my role permissions and position in the role hierarchy.",
-                "Forbidden"
+                "> Discord rejected this action due to missing permissions or role hierarchy constraints.",
+                "Forbidden",
             )
-            await self.send_error(interaction, embed)
-        
-        # Not found (404)
-        elif isinstance(error, discord.NotFound):
-            embed = self.create_error_embed(
-                "Not Found",
-                "The requested resource was not found. It may have been deleted.",
-                "NotFound"
-            )
-            await self.send_error(interaction, embed)
-        
-        # Attribute Error (like the one you had)
-        elif isinstance(error, AttributeError):
-            embed = self.create_error_embed(
-                "Internal Error",
-                f"An internal error occurred. Please try again or contact support.\n\n``````",
-                "AttributeError"
-            )
-            await self.send_error(interaction, embed)
-            logger.error(f"AttributeError in command {interaction.command.name}:")
-            traceback.print_exception(type(error), error, error.__traceback__, file=sys.stderr)
-        
-        # Generic error
+            await self.send_error(interaction, view)
+
         else:
-            embed = self.create_error_embed(
-                "Unexpected Error",
-                f"An unexpected error occurred while executing the command.\n\n``````",
-                type(error).__name__
+            cmd_name = interaction.command.name if interaction.command else "Unknown"
+            view = self.create_error_view(
+                "Command Execution Error",
+                f"> An error occurred while executing `/{cmd_name}`.\n"
+                f"```py\n{str(error)[:300]}\n```",
+                type(error).__name__,
             )
-            await self.send_error(interaction, embed)
-            
-            # Log full traceback
-            logger.error(f"Unhandled error in slash command {interaction.command.name}:")
+            await self.send_error(interaction, view)
+            logger.error("Unhandled error in slash command %s:", cmd_name)
             traceback.print_exception(type(error), error, error.__traceback__, file=sys.stderr)
-    
-    @commands.Cog.listener()
-    async def on_error(self, event, *args, **kwargs):
-        """Handle errors in events"""
-        logger.error(f"Error in event {event}:")
-        traceback.print_exc()
+
+            if hasattr(self.bot, "send_support_log"):
+                try:
+                    await self.bot.send_support_log(
+                        title="⚠️ Unhandled Slash Command Error",
+                        description=f"Slash command `/{cmd_name}` failed during execution.",
+                        color=ERROR_COLOR,
+                        fields=[
+                            {"name": "Command", "value": f"`/{cmd_name}`", "inline": True},
+                            {"name": "Author", "value": f"{interaction.user} (`{interaction.user.id}`)", "inline": True},
+                            {"name": "Server", "value": f"{interaction.guild.name if interaction.guild else 'DMs'} (`{interaction.guild.id if interaction.guild else 'N/A'}`)", "inline": True},
+                            {"name": "Exception", "value": f"```{type(error).__name__}: {str(error)[:250]}```", "inline": False},
+                        ],
+                    )
+                except Exception as exc:
+                    logger.debug("Error sending support log: %s", exc)
 
 
-async def setup(bot):
+async def setup(bot: commands.Bot):
     await bot.add_cog(ErrorHandler(bot))

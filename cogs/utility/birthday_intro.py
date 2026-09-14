@@ -455,9 +455,10 @@ class BirthdayIntro(commands.Cog):
         self.settings_store_path = os.path.join("data", "birthday_settings.json")
 
     async def cog_load(self):
-        if self.bot.mongo_db is not None:
-            self.col = self.bot.mongo_db["birthday"]
-            self.scol = self.bot.mongo_db["birthday_settings"]
+        mongo = getattr(self.bot, "mongo_db", None)
+        if mongo is not None:
+            self.col = mongo["birthday"]
+            self.scol = mongo["birthday_settings"]
         else:
             logger.warning("%s: mongo_db unavailable", self.__class__.__name__)
         if self.bot.is_ready():
@@ -1244,4 +1245,4 @@ class BirthdayIntro(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(BirthdayIntro(bot))
-    logger.info("Loaded BirthdayIntro")
+    logger.debug("Loaded BirthdayIntro")

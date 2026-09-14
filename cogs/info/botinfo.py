@@ -1,6 +1,14 @@
+"""
+cogs/info/botinfo.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Interactive Components V2 Bot Information & Diagnostics
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+
 import inspect
 import logging
 import os
+import platform
 import sys
 from datetime import datetime, timezone
 
@@ -9,7 +17,141 @@ import psutil
 from discord import app_commands
 from discord.ext import commands
 
+from utils.ui import (
+    CYAN_COLOR,
+    BRAND_COLOR,
+    NexoraView,
+    DismissButton,
+    latency_badge,
+    progress_bar,
+    send_view,
+    ts_format,
+)
+
 logger = logging.getLogger(__name__)
+
+
+class BotInfoView(NexoraView):
+    """Interactive Components V2 system diagnostics view."""
+
+    def __init__(self, cog: "BotInfo", requester: discord.abc.User, timeout: float = 180):
+        super().__init__(
+            bot=cog.bot,
+            user_id=requester.id,
+            color=CYAN_COLOR,
+            timeout=timeout,
+        )
+        self.cog = cog
+        self.requester = requester
+        self._build()
+
+    def _build(self):
+        self.clear_container()
+        now = datetime.now(timezone.utc)
+        start_time = self.cog._coerce_datetime(
+            getattr(self.bot, "bot_stats", {}).get("start_time", now)
+        )
+        uptime = now - start_time
+        uptime_str = (
+            f"{uptime.days}d "
+            f"{uptime.seconds // 3600:02d}h "
+            f"{(uptime.seconds // 60) % 60:02d}m "
+            f"{uptime.seconds % 60:02d}s"
+        )
+
+        try:
+            proc = psutil.Process(os.getpid())
+            mem_mb = proc.memory_info().rss / 1024 / 1024
+            cpu_percent = proc.cpu_percent(interval=None)
+        except Exception:
+            mem_mb = 0.0
+            cpu_percent = 0.0
+
+        latency_ms = self.bot.latency * 1000
+        lat_indicator = latency_badge(latency_ms)
+
+        total_users = sum(g.member_count or 0 for g in self.bot.guilds)
+        total_channels = sum(len(g.channels) for g in self.bot.guilds)
+        total_guilds = len(self.bot.guilds)
+
+        avatar_url = str(self.bot.user.display_avatar.url) if self.bot.user else None
+
+        # ── Header Section ────────────────────────────────────────────────────
+        header_text = (
+            "# 🤖 Nexora Core · Diagnostics\n"
+            "> High-performance multi-purpose Discord system · Built with Components V2"
+        )
+        self.add_section(header_text, thumbnail_url=avatar_url)
+        self.add_separator(discord.SeparatorSpacing.small)
+
+        # ── System Performance Block ──────────────────────────────────────────
+        mem_bar = progress_bar(mem_mb, 1024.0, length=8)
+        cpu_bar = progress_bar(cpu_percent, 100.0, length=8)
+
+        sys_block = (
+            "### ⚡ Performance & Health\n"
+            f"• **Ping / Latency:** {lat_indicator}\n"
+            f"• **Memory:** `{mem_bar}` **{mem_mb:.1f} MB**\n"
+            f"• **CPU Load:** `{cpu_bar}` **{cpu_percent:.1f}%**\n"
+            f"• **Uptime:** **{uptime_str}** · Online since {ts_format(start_time, 'D')}"
+        )
+        self.add_text(sys_block)
+        self.add_separator(discord.SeparatorSpacing.small)
+
+        # ── Network & Environment Block ───────────────────────────────────────
+        py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        os_name = f"{platform.system()} {platform.release()}"
+
+        stats_block = (
+            "### 🌐 Network & Infrastructure\n"
+            f"• **Guilds:** `{total_guilds:,}` servers · **Users:** `{total_users:,}` members\n"
+            f"• **Channels:** `{total_channels:,}` total channels\n"
+            f"• **Engine:** Python `{py_ver}` · discord.py `{discord.__version__}`\n"
+            f"• **Environment:** `{os_name}`"
+        )
+        self.add_text(stats_block)
+
+        # ── Footer ────────────────────────────────────────────────────────────
+        self.add_footer(
+            f"Requested by {self.requester.display_name} · Last updated {ts_format(now, 'T')}"
+        )
+
+        # ── Action Buttons ────────────────────────────────────────────────────
+        refresh_btn = discord.ui.Button(
+            label="Refresh",
+            emoji="🔄",
+            style=discord.ButtonStyle.primary,
+        )
+        refresh_btn.callback = self._on_refresh
+
+        invite_perms = discord.Permissions(
+            view_channel=True,
+            send_messages=True,
+            embed_links=True,
+            attach_files=True,
+            read_message_history=True,
+            use_application_commands=True,
+        )
+        invite_url = discord.utils.oauth_url(self.bot.user.id, permissions=invite_perms)
+        invite_btn = discord.ui.Button(
+            label="Invite",
+            emoji="🔗",
+            style=discord.ButtonStyle.link,
+            url=invite_url,
+        )
+
+        dismiss_btn = DismissButton(user_id=self.requester.id)
+        self.add_row(refresh_btn, invite_btn, dismiss_btn)
+
+    async def _on_refresh(self, interaction: discord.Interaction):
+        if interaction.user.id != self.requester.id:
+            await interaction.response.send_message(
+                "❌ You cannot interact with someone else's bot info card.",
+                ephemeral=True,
+            )
+            return
+        self._build()
+        await interaction.response.edit_message(view=self)
 
 
 class BotInfo(commands.Cog):
@@ -32,89 +174,14 @@ class BotInfo(commands.Cog):
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
 
-    async def _is_premium(self, guild_id: int) -> bool:
-        checker = getattr(self.bot, "is_premium_guild", self._default_premium_check)
-        result = checker(guild_id)
-        if inspect.isawaitable(result):
-            result = await result
-        return bool(result)
-
-    async def _build_embed(self, requester: discord.abc.User) -> discord.Embed:
-        now = datetime.now(timezone.utc)
-        start_time = self._coerce_datetime(
-            getattr(self.bot, "bot_stats", {}).get("start_time", now)
-        )
-        uptime = now - start_time
-        uptime_str = (
-            f"{uptime.days}d "
-            f"{uptime.seconds // 3600:02d}h "
-            f"{(uptime.seconds // 60) % 60:02d}m "
-            f"{uptime.seconds % 60:02d}s"
-        )
-
-        try:
-            proc = psutil.Process(os.getpid())
-            mem_mb = proc.memory_info().rss / 1024 / 1024
-            cpu_percent = proc.cpu_percent(interval=0.1)
-        except Exception:
-            mem_mb = 0
-            cpu_percent = 0
-
-        premium_servers = 0
-        try:
-            for guild in self.bot.guilds:
-                if await self._is_premium(guild.id):
-                    premium_servers += 1
-        except Exception as exc:
-            logger.warning("Failed to count premium servers: %s", exc)
-            premium_servers = 0
-
-        total_users = sum(g.member_count or 0 for g in self.bot.guilds)
-
-        embed = discord.Embed(
-            title="🤖 Nexora Bot",
-            description="**Premium Discord Management Bot**",
-            color=0x0099FF,
-            timestamp=now,
-        )
-        embed.add_field(name="🖥️ Servers", value=f"{len(self.bot.guilds):,}", inline=True)
-        embed.add_field(name="👥 Users", value=f"{total_users:,}", inline=True)
-        embed.add_field(
-            name="📢 Channels",
-            value=f"{len(list(self.bot.get_all_channels())):,}",
-            inline=True,
-        )
-        embed.add_field(name="⏱️ Uptime", value=uptime_str, inline=True)
-        embed.add_field(name="🌐 Latency", value=f"{self.bot.latency * 1000:.1f}ms", inline=True)
-        embed.add_field(name="💾 Memory", value=f"{mem_mb:.1f} MB", inline=True)
-        embed.add_field(name="🖱️ CPU", value=f"{cpu_percent:.1f}%", inline=True)
-        embed.add_field(name="🐍 Python", value=".".join(map(str, sys.version_info[:3])), inline=True)
-        embed.add_field(name="💎 Premium Servers", value=f"{premium_servers:,}", inline=True)
-
-        if self.bot.user:
-            embed.set_thumbnail(url=str(self.bot.user.display_avatar))
-        embed.set_footer(
-            text=f"Requested by {requester.display_name}",
-            icon_url=str(requester.display_avatar),
-        )
-        return embed
-
-    @commands.hybrid_command(name="botinfo", description="🤖 View bot and system information", aliases=["bi"])
+    @commands.hybrid_command(
+        name="botinfo",
+        description="🤖 View live bot statistics and system diagnostics",
+        aliases=["bi"],
+    )
     async def botinfo(self, ctx: commands.Context):
-        if ctx.interaction:
-            await ctx.defer(ephemeral=False)
-
-        embed = await self._build_embed(ctx.author)
-        try:
-            await ctx.send(embed=embed)
-        except Exception as exc:
-            logger.error("Botinfo error: %s", exc)
-            await ctx.send("❌ Error sending info")
-
-    @app_commands.command(name="bi", description="Alias for /botinfo")
-    async def botinfo_alias(self, interaction: discord.Interaction):
-        embed = await self._build_embed(interaction.user)
-        await interaction.response.send_message(embed=embed)
+        view = BotInfoView(self, ctx.author)
+        await send_view(ctx, view)
 
 
 async def setup(bot):

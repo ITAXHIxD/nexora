@@ -1,30 +1,9 @@
 """
-cogs/core/premium.py
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MongoDB-backed premium system for Nexora.
-
-Collection: "premium"
-Document schema:
-  {
-    _id:            guild_id (int),
-    tier:           "FREE" | "BASIC" | "PRO" | "ULTRA" | "GRANDFATHERED",
-    expires_at:     datetime | None  (None = permanent),
-    purchased_by:   user_id (int),
-    purchased_at:   datetime,
-    payment_method: str,
-    amount_paid:    float,
-    notes:          str,
-  }
-
-Commands:
-  n!premium / /premium           — check this server's premium status
-  n!set_premium (owner only)     — grant / extend premium
-  n!revoke_premium (owner only)  — remove premium
-  n!premium_price                — show pricing info
-  n!vanity                       — show vanity role config (premium only)
-
-bot.is_premium_guild(guild_id) is patched onto the bot object in cog_load.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+cogs/moderation/mute.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Interactive Components V2 Mute (Timeout) & Unmute Commands
+Uses Discord's native member timeouts (up to 28 days).
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
 import logging
@@ -35,386 +14,203 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from cogs.moderation.mod_utils import (
+    ModActionView,
+    ModConfirmLayoutView,
+    can_action,
+    dm_embed,
+    fmt_duration,
+    log_mod_action,
+    parse_duration,
+    try_dm,
+)
+from utils.ui import send_view, ts_format
+
 logger = logging.getLogger(__name__)
-
-# ── Tier config ────────────────────────────────────────────────────────────────
-
-TIERS = {
-    "FREE":          {"emoji": "🆓", "color": discord.Color.greyple(),             "vanity_slots": 0},
-    "BASIC":         {"emoji": "⭐", "color": discord.Color.from_rgb(100,149,237), "vanity_slots": 1},
-    "PRO":           {"emoji": "💎", "color": discord.Color.from_rgb(138,43,226),  "vanity_slots": 3},
-    "ULTRA":         {"emoji": "👑", "color": discord.Color.gold(),                "vanity_slots": 5},
-    "GRANDFATHERED": {"emoji": "🏆", "color": discord.Color.from_rgb(255,140,0),   "vanity_slots": 5},
-}
-
-PRICING = [
-    {
-        "tier":     "BASIC",
-        "monthly":  "$1",
-        "yearly":   "$10",
-        "features": ["1 Vanity Role", "Status Matching", "Basic priority support"],
-    },
-    {
-        "tier":     "PRO",
-        "monthly":  "$3",
-        "yearly":   "$30",
-        "features": ["3 Vanity Roles", "Audit logging", "Priority support"],
-    },
-    {
-        "tier":     "ULTRA",
-        "monthly":  "$5",
-        "yearly":   "$50",
-        "features": ["5 Vanity Roles", "Audit logging", "Top priority support", "All future features"],
-    },
-]
+MAX_TIMEOUT_DAYS = 28  # Discord API limit for timeouts
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-
-def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _is_expired(doc: dict) -> bool:
-    exp = doc.get("expires_at")
-    if exp is None:
-        return False  # permanent
-    if isinstance(exp, str):
-        try:
-            exp = datetime.fromisoformat(exp)
-        except ValueError:
-            return False
-    # Make timezone-aware if naive
-    if exp.tzinfo is None:
-        exp = exp.replace(tzinfo=timezone.utc)
-    return exp < utcnow()
-
-
-def _fmt_expiry(doc: dict) -> str:
-    exp = doc.get("expires_at")
-    if exp is None:
-        return "∞ Permanent"
-    if isinstance(exp, str):
-        try:
-            exp = datetime.fromisoformat(exp)
-        except ValueError:
-            return "Unknown"
-    if exp.tzinfo is None:
-        exp = exp.replace(tzinfo=timezone.utc)
-    if exp < utcnow():
-        return "❌ Expired"
-    ts = int(exp.timestamp())
-    return f"<t:{ts}:R>  (<t:{ts}:D>)"
-
-
-# ── Cog ────────────────────────────────────────────────────────────────────────
-
-class Premium(commands.Cog):
+class Mute(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.col = None  # set in cog_load
-
-    async def cog_load(self):
-        db = getattr(self.bot, "mongo_db", None)
-        if db is not None:
-            self.col = db["premium"]
-            logger.info("Premium: connected to MongoDB")
-        else:
-            logger.warning("Premium: mongo_db unavailable — premium checks will always return False")
-
-        # Patch bot so other cogs can call bot.is_premium_guild(guild_id)
-        async def _is_premium(guild_id: int) -> bool:
-            return await self.is_premium(guild_id)
-
-        self.bot.is_premium_guild = _is_premium
-
-    # ── Core checks ────────────────────────────────────────────────────────────
-
-    async def get_doc(self, guild_id: int) -> dict:
-        if self.col is None:
-            return {}
-        doc = await self.col.find_one({"_id": guild_id})
-        return doc or {}
-
-    async def is_premium(self, guild_id: int) -> bool:
-        doc = await self.get_doc(guild_id)
-        if not doc:
-            return False
-        if doc.get("tier") == "GRANDFATHERED":
-            return True
-        if _is_expired(doc):
-            return False
-        return doc.get("tier", "FREE") != "FREE"
-
-    async def get_tier(self, guild_id: int) -> str:
-        doc = await self.get_doc(guild_id)
-        if not doc:
-            return "FREE"
-        if _is_expired(doc):
-            return "FREE"
-        return doc.get("tier", "FREE")
-
-    async def get_vanity_roles(self, guild_id: int) -> dict:
-        doc = await self.get_doc(guild_id)
-        return doc.get("vanity_roles", {})
-
-    # ── /premium ───────────────────────────────────────────────────────────────
 
     @commands.hybrid_command(
-        name="premium",
-        description="Check this server's premium status",
+        name="mute",
+        description="🔇 Timeout/mute a member in the server for a specified duration",
+        aliases=["timeout"],
     )
+    @app_commands.describe(
+        member="The member to timeout/mute",
+        duration="Duration of timeout (e.g. 10m, 1h, 1d, 7d — default: 1h)",
+        reason="Reason for timeout",
+    )
+    @commands.has_permissions(moderate_members=True)
+    @commands.bot_has_permissions(moderate_members=True)
     @commands.guild_only()
-    async def premium_status(self, ctx: commands.Context):
-        await ctx.defer()
-        doc  = await self.get_doc(ctx.guild.id)
-        tier = doc.get("tier", "FREE")
-
-        # Handle expired subs
-        if tier != "FREE" and tier != "GRANDFATHERED" and _is_expired(doc):
-            tier = "FREE"
-
-        tier_info = TIERS.get(tier, TIERS["FREE"])
-        is_prem   = tier not in ("FREE",) and not _is_expired(doc)
-
-        embed = discord.Embed(
-            title=f"{tier_info['emoji']} {ctx.guild.name}  —  Premium Status",
-            color=tier_info["color"],
-            timestamp=utcnow(),
-        )
-
-        if ctx.guild.icon:
-            embed.set_thumbnail(url=ctx.guild.icon.url)
-
-        embed.add_field(
-            name="📦 Tier",
-            value=f"**{tier}** {tier_info['emoji']}",
-            inline=True,
-        )
-        embed.add_field(
-            name="✅ Active",
-            value="Yes" if is_prem else "No",
-            inline=True,
-        )
-        embed.add_field(
-            name="🎭 Vanity Slots",
-            value=str(tier_info["vanity_slots"]),
-            inline=True,
-        )
-
-        if doc:
-            embed.add_field(
-                name="🕐 Expires",
-                value=_fmt_expiry(doc),
-                inline=True,
-            )
-
-            purchased_by = doc.get("purchased_by")
-            if purchased_by:
-                user = self.bot.get_user(int(purchased_by))
-                embed.add_field(
-                    name="🛒 Purchased By",
-                    value=user.mention if user else f"`{purchased_by}`",
-                    inline=True,
-                )
-
-            purchased_at = doc.get("purchased_at")
-            if purchased_at:
-                if isinstance(purchased_at, str):
-                    try:
-                        purchased_at = datetime.fromisoformat(purchased_at)
-                    except ValueError:
-                        purchased_at = None
-                if purchased_at:
-                    ts = int(purchased_at.timestamp()) if purchased_at.tzinfo else int(purchased_at.replace(tzinfo=timezone.utc).timestamp())
-                    embed.add_field(name="📅 Since", value=f"<t:{ts}:D>", inline=True)
-
-            if doc.get("notes"):
-                embed.add_field(name="📝 Notes", value=doc["notes"], inline=False)
-
-        if not is_prem:
-            embed.add_field(
-                name="🚀 Upgrade",
-                value="Use `n!premium_price` to see plans — starting at **$1/month**!",
-                inline=False,
-            )
-
-        embed.set_footer(text="Nexora Premium")
-        await ctx.send(embed=embed)
-
-    # ── /set_premium (owner only) ──────────────────────────────────────────────
-
-    @commands.command(name="set_premium")
-    @commands.is_owner()
-    async def set_premium(
+    async def mute(
         self,
         ctx: commands.Context,
-        guild_id: Optional[str] = None,
-        tier: str = "ULTRA",
-        days: int = 30,
+        member: discord.Member,
+        duration: Optional[str] = "1h",
+        reason: Optional[str] = None,
     ):
-        """
-        [Owner] Grant premium to a guild.
-        Usage: n!set_premium [guild_id] [tier] [days]
-          days = -1 for permanent
-          tier = BASIC | PRO | ULTRA | GRANDFATHERED
-        """
-        if self.col is None:
-            return await ctx.send("❌ MongoDB not connected.")
-
-        gid     = int(guild_id) if guild_id else ctx.guild.id
-        tier    = tier.upper()
-        expires = None if days == -1 else utcnow() + timedelta(days=days)
-
-        if tier not in TIERS:
+        td = parse_duration(duration or "1h")
+        if td is None:
             return await ctx.send(
-                f"❌ Unknown tier `{tier}`. Valid: {', '.join(TIERS)}", ephemeral=True
+                "❌ Invalid duration format. Examples: `10m`, `30m`, `1h`, `12h`, `1d`, `7d`",
+                ephemeral=True,
             )
 
-        doc = {
-            "_id":            gid,
-            "tier":           tier,
-            "expires_at":     expires,
-            "purchased_by":   ctx.author.id,
-            "purchased_at":   utcnow(),
-            "payment_method": "Manual",
-            "amount_paid":    0,
-            "notes":          f"Set by {ctx.author} ({ctx.author.id})",
-            "vanity_roles":   {},
-        }
-
-        await self.col.update_one({"_id": gid}, {"$set": doc}, upsert=True)
-
-        guild = self.bot.get_guild(gid)
-        name  = guild.name if guild else str(gid)
-        dur   = "permanent" if days == -1 else f"{days}d"
-
-        embed = discord.Embed(
-            title="✅ Premium Updated",
-            description=f"**{name}** (`{gid}`) → **{tier}** ({dur})",
-            color=TIERS[tier]["color"],
-            timestamp=utcnow(),
-        )
-        if expires:
-            embed.add_field(name="Expires", value=_fmt_expiry(doc))
-        embed.set_footer(text=f"Set by {ctx.author}")
-        await ctx.send(embed=embed)
-        logger.info("set_premium: %s → %s (%s) by %s", gid, tier, dur, ctx.author)
-
-    # ── /revoke_premium (owner only) ───────────────────────────────────────────
-
-    @commands.command(name="revoke_premium")
-    @commands.is_owner()
-    async def revoke_premium(self, ctx: commands.Context, guild_id: Optional[str] = None):
-        """[Owner] Remove premium from a guild."""
-        if self.col is None:
-            return await ctx.send("❌ MongoDB not connected.")
-
-        gid = int(guild_id) if guild_id else ctx.guild.id
-        await self.col.update_one(
-            {"_id": gid},
-            {"$set": {"tier": "FREE", "expires_at": utcnow()}},
-            upsert=True,
-        )
-        guild = self.bot.get_guild(gid)
-        name  = guild.name if guild else str(gid)
-        await ctx.send(f"✅ Revoked premium from **{name}** (`{gid}`)")
-        logger.info("revoke_premium: %s by %s", gid, ctx.author)
-
-    # ── /premium_price ─────────────────────────────────────────────────────────
-
-    @commands.hybrid_command(
-        name="premium_price",
-        description="Show Nexora premium plans and pricing",
-        aliases=["plans", "upgrade"],
-    )
-    async def premium_price(self, ctx: commands.Context):
-        embed = discord.Embed(
-            title="💎 Nexora Premium Plans",
-            description="Unlock advanced features for your server — starting at just **$1/month**.",
-            color=discord.Color.gold(),
-            timestamp=utcnow(),
-        )
-
-        for plan in PRICING:
-            tier_info = TIERS[plan["tier"]]
-            features  = "\n".join(f"• {f}" for f in plan["features"])
-            embed.add_field(
-                name=f"{tier_info['emoji']} {plan['tier']}  —  {plan['monthly']}/mo  ·  {plan['yearly']}/yr",
-                value=features,
-                inline=False,
+        if td.total_seconds() > MAX_TIMEOUT_DAYS * 86400:
+            return await ctx.send(
+                f"❌ Maximum timeout duration is **{MAX_TIMEOUT_DAYS} days**.",
+                ephemeral=True,
             )
 
-        embed.add_field(
-            name="🎁 Why so affordable?",
-            value=(
-                "✅ Cheapest feature-rich Discord bot\n"
-                "✅ Cancel anytime — no lock-in\n"
-                "✅ Instant activation\n"
-                "✅ All future tier features included"
-            ),
-            inline=False,
+        err = can_action(ctx.author, member)
+        if err:
+            return await ctx.send(err, ephemeral=True)
+
+        reason_text = reason or "No reason provided."
+        dur_str = fmt_duration(td)
+
+        details_lines = [f"Target will be timed out for **{dur_str}**."]
+        if member.is_timed_out() and member.timed_out_until:
+            details_lines.append(f"*(Overwrites current timeout expiring {ts_format(member.timed_out_until, 'R')})*")
+
+        confirm_view = ModConfirmLayoutView(
+            action="mute",
+            target=member,
+            moderator=ctx.author,
+            reason=reason_text,
+            details=" ".join(details_lines),
+            timeout=30.0,
         )
-        embed.set_footer(text="Nexora Premium  ·  Contact the bot owner to subscribe")
-        await ctx.send(embed=embed)
+        msg = await send_view(ctx, confirm_view)
+        await confirm_view.wait()
 
-    # ── /vanity ────────────────────────────────────────────────────────────────
+        if not confirm_view.confirmed:
+            return
 
-    @commands.hybrid_command(
-        name="vanity",
-        description="View this server's vanity role configuration",
-    )
-    @commands.guild_only()
-    async def vanity(self, ctx: commands.Context):
-        if not await self.is_premium(ctx.guild.id):
-            embed = discord.Embed(
-                description=(
-                    "❌ **This server doesn't have premium.**\n\n"
-                    "Use `n!premium_price` to see plans."
-                ),
-                color=discord.Color.red(),
-            )
-            return await ctx.send(embed=embed, ephemeral=True)
+        until = datetime.now(timezone.utc) + td
 
-        doc   = await self.get_doc(ctx.guild.id)
-        roles = doc.get("vanity_roles", {})
-        tier  = doc.get("tier", "FREE")
-        slots = TIERS.get(tier, TIERS["FREE"])["vanity_slots"]
+        # ── Execute Timeout First (Safety order) ───────────────────────────────
+        try:
+            await member.timeout(until, reason=f"[{ctx.author}] {reason_text}")
+        except discord.Forbidden:
+            return await ctx.send("❌ Discord rejected timeout. My role must be higher than the target's highest role.", ephemeral=True)
+        except Exception as e:
+            return await ctx.send(f"❌ Failed to apply timeout: `{e}`", ephemeral=True)
 
-        embed = discord.Embed(
-            title="🎭 Vanity Roles",
-            color=TIERS.get(tier, TIERS["FREE"])["color"],
-            timestamp=utcnow(),
+        # ── Send DM notification after API success ────────────────────────────
+        await try_dm(member, dm_embed("mute", ctx.guild, ctx.author, reason_text, duration=td))
+
+        result_view = ModActionView(
+            action="mute",
+            target=member,
+            moderator=ctx.author,
+            reason=reason_text,
+            duration=td,
+            extra=f"Expires {ts_format(until, 'R')}",
         )
-        embed.add_field(name="📦 Tier",       value=tier,                    inline=True)
-        embed.add_field(name="🎰 Slots Used", value=f"{len(roles)} / {slots}", inline=True)
-
-        if roles:
-            lines = []
-            for keyword, role_id in list(roles.items())[:slots]:
-                role = ctx.guild.get_role(int(role_id))
-                lines.append(f"`{keyword}` → {role.mention if role else f'`{role_id}` (deleted)'}")
-            embed.add_field(name="🔗 Configured Roles", value="\n".join(lines), inline=False)
+        if msg:
+            try:
+                await msg.edit(view=result_view)
+            except Exception:
+                await ctx.send(view=result_view)
         else:
-            embed.add_field(
-                name="🔗 Configured Roles",
-                value="None yet. Contact the bot owner to configure vanity roles.",
-                inline=False,
-            )
+            await ctx.send(view=result_view)
 
-        embed.set_footer(text="Nexora Premium  ·  Vanity roles auto-assign based on status keywords")
-        await ctx.send(embed=embed)
+        await log_mod_action(
+            ctx.guild,
+            "mute",
+            member,
+            ctx.author,
+            reason_text,
+            duration=td,
+            bot=self.bot,
+        )
+        logger.info("Mute: %s timed out %s for %s | reason: %s", ctx.author, member, dur_str, reason_text)
 
-    # ── Error handlers ─────────────────────────────────────────────────────────
+    @mute.autocomplete("duration")
+    async def duration_autocomplete(self, interaction: discord.Interaction, current: str):
+        presets = [
+            ("1 minute", "1m"),
+            ("5 minutes", "5m"),
+            ("10 minutes", "10m"),
+            ("30 minutes", "30m"),
+            ("1 hour", "1h"),
+            ("6 hours", "6h"),
+            ("12 hours", "12h"),
+            ("1 day", "1d"),
+            ("3 days", "3d"),
+            ("7 days", "7d"),
+            ("14 days", "14d"),
+            ("28 days (Max)", "28d"),
+        ]
+        return [
+            app_commands.Choice(name=f"{label} ({val})", value=val)
+            for label, val in presets
+            if current.lower() in label.lower() or current.lower() in val.lower()
+        ][:25]
 
-    @premium_status.error
-    async def premium_error(self, ctx, error):
-        if isinstance(error, commands.NoPrivateMessage):
-            await ctx.send("❌ This command can only be used in a server.", ephemeral=True)
+    @commands.hybrid_command(
+        name="unmute",
+        description="🔊 Remove timeout / unmute a member",
+        aliases=["untimeout"],
+    )
+    @app_commands.describe(
+        member="The member to unmute",
+        reason="Reason for removing the timeout",
+    )
+    @commands.has_permissions(moderate_members=True)
+    @commands.bot_has_permissions(moderate_members=True)
+    @commands.guild_only()
+    async def unmute(
+        self,
+        ctx: commands.Context,
+        member: discord.Member,
+        reason: Optional[str] = None,
+    ):
+        err = can_action(ctx.author, member)
+        if err:
+            return await ctx.send(err, ephemeral=True)
+
+        if not member.is_timed_out():
+            return await ctx.send(f"❌ {member.mention} is not currently timed out.", ephemeral=True)
+
+        reason_text = reason or "Timeout removed by moderator."
+        await member.timeout(None, reason=f"[{ctx.author}] {reason_text}")
+
+        result_view = ModActionView(
+            action="unmute",
+            target=member,
+            moderator=ctx.author,
+            reason=reason_text,
+        )
+        await send_view(ctx, result_view)
+        await log_mod_action(
+            ctx.guild,
+            "unmute",
+            member,
+            ctx.author,
+            reason_text,
+            bot=self.bot,
+        )
+        logger.info("Unmute: %s unmuted %s | reason: %s", ctx.author, member, reason_text)
+
+    @mute.error
+    @unmute.error
+    async def mute_error(self, ctx: commands.Context, error):
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.send("❌ You need the **Moderate Members (Timeout)** permission.", ephemeral=True)
+        elif isinstance(error, commands.BotMissingPermissions):
+            await ctx.send("❌ I need the **Moderate Members (Timeout)** permission to manage timeouts.", ephemeral=True)
+        elif isinstance(error, commands.MemberNotFound):
+            await ctx.send("❌ Member not found.", ephemeral=True)
         else:
             raise error
 
 
 async def setup(bot: commands.Bot):
-    await bot.add_cog(Premium(bot))
-    logger.info("Loaded Premium")
+    await bot.add_cog(Mute(bot))

@@ -519,8 +519,8 @@ class HelpSystem(commands.Cog):
         permissions = channel.permissions_for(bot_member)
         return permissions.send_messages and permissions.view_channel
     
-    @commands.hybrid_command(name="set_send_mode", description="Configure automatic guidelines messages")
-    @app_commands.default_permissions(manage_guild=True)
+    @commands.command(name="set_send_mode", description="Configure automatic guidelines messages")
+    @commands.has_permissions(manage_guild=True)
     async def set_send_mode(self, ctx: commands.Context):
         """Configure guidelines message settings through an interactive UI"""
         

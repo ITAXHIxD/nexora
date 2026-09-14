@@ -32,6 +32,15 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from utils.ui import (
+    BRAND_COLOR,
+    PREMIUM_COLOR,
+    NexoraView,
+    DismissButton,
+    send_view,
+    ts_format,
+)
+
 logger = logging.getLogger(__name__)
 
 UNSAFE_VANITY_WEBHOOK_FIELDS = (
@@ -256,25 +265,157 @@ def _feature_row(key: str, value) -> str:
     return f"✅ {label}: {value}"
 
 
-class PremiumActionsView(discord.ui.View):
-    """Small, non-intrusive navigation for premium information cards."""
+class PremiumStatusCardView(NexoraView):
+    """Components V2 dashboard for server premium status."""
 
-    def __init__(self, timeout=180):
-        super().__init__(timeout=timeout)
+    def __init__(self, guild: discord.Guild, doc: dict, requester: discord.abc.User, timeout: float = 180):
+        tier = (doc.get("tier", "FREE") or "FREE").upper()
+        if tier not in ("GRANDFATHERED",) and _is_expired(doc):
+            tier = "FREE"
+        cfg = TIER_CONFIG.get(tier, TIER_CONFIG["FREE"])
+        color_val = cfg["color"].value if hasattr(cfg["color"], "value") else PREMIUM_COLOR
+        super().__init__(user_id=requester.id, color=color_val, timeout=timeout)
+        self.guild = guild
+        self.doc = doc
+        self.tier = tier
+        self.cfg = cfg
+        self.requester = requester
+        self._build()
 
-    @discord.ui.button(label="View Plans", style=discord.ButtonStyle.secondary, emoji="💎")
-    async def view_plans(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            "Use `/premium_price` to compare plans and see what each tier adds.",
-            ephemeral=True,
+    def _build(self):
+        self.clear_container()
+        g = self.guild
+        cfg = self.cfg
+        is_prem = self.tier in PAID_TIERS and not _is_expired(self.doc)
+
+        header = (
+            f"# {cfg['emoji']} {g.name} · Premium Status\n"
+            f"> Tier: **{cfg['display_name']}** · Active: **{'✅ Active' if is_prem else '🆓 Free Tier'}**"
         )
+        self.add_section(header, thumbnail_url=str(g.icon.url) if g.icon else None)
+        self.add_separator(discord.SeparatorSpacing.small)
 
-    @discord.ui.button(label="What Stays Free?", style=discord.ButtonStyle.secondary, emoji="🆓")
-    async def free_features(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            "Core commands remain free. Premium is for optional scale, automation, and customization.",
-            ephemeral=True,
+        meta_lines = [
+            f"• **Vanity Slots:** `{_vanity_slots(self.tier)}` slots",
+            f"• **Expiration:** {_fmt_expiry(self.doc)}",
+        ]
+        purchased_by = self.doc.get("purchased_by")
+        if purchased_by:
+            meta_lines.append(f"• **Purchased By:** <@{purchased_by}>")
+        purchased_at = _parse_dt(self.doc.get("purchased_at"))
+        if purchased_at:
+            meta_lines.append(f"• **Active Since:** <t:{int(purchased_at.timestamp())}:D>")
+
+        self.add_text("### 📦 Subscription Overview\n" + "\n".join(meta_lines))
+        self.add_separator(discord.SeparatorSpacing.small)
+
+        feats = cfg["features"]
+        feat_lines = [_feature_row(k, v) for k, v in feats.items() if v]
+        if feat_lines:
+            self.add_text("### 🔓 Unlocked Features\n" + "\n".join(f"• {f}" for f in feat_lines[:8]))
+
+        if not is_prem:
+            self.add_text("### 🚀 Ready to Upgrade?\n> Use `/premium_price` to compare plans or contact the bot owner.")
+
+        self.add_footer(f"Requested by {self.requester.display_name} · Nexora Premium Network")
+
+        btn_plans = discord.ui.Button(label="Compare Plans", emoji="💎", style=discord.ButtonStyle.secondary, custom_id="prem-plans")
+        async def on_plans(interaction: discord.Interaction):
+            await interaction.response.send_message("Use `/premium_price` to view full catalog & pricing.", ephemeral=True)
+        btn_plans.callback = on_plans
+
+        self.add_row(btn_plans, DismissButton(user_id=self.requester.id))
+
+
+class PremiumCatalogCardView(NexoraView):
+    """Components V2 card showcasing all premium tiers and pricing."""
+
+    def __init__(self, requester: discord.abc.User, timeout: float = 180):
+        super().__init__(user_id=requester.id, color=PREMIUM_COLOR, timeout=timeout)
+        self.requester = requester
+        self._build()
+
+    def _build(self):
+        self.clear_container()
+        header = (
+            "# 💎 Nexora Premium Catalog\n"
+            "> Unlock vanity roles, extended message history, AI prioritization, and server perks."
         )
+        self.add_text(header)
+        self.add_separator(discord.SeparatorSpacing.small)
+
+        tier_summaries = []
+        for key in ("BASIC", "PRO", "ENTERPRISE", "CUSTOM"):
+            cfg = TIER_CONFIG[key]
+            price = cfg["price"]
+            price_str = f"${price}/mo" if price is not None else "Custom"
+            feats = cfg["features"]
+            slots = feats.get("vanity_roles", 0)
+            slots_str = "Unlimited" if slots == -1 else str(slots)
+            tier_summaries.append(
+                f"### {cfg['display_name']} — `{price_str}`\n"
+                f"• 🎭 Vanity Roles: **{slots_str}**\n"
+                f"• 📜 History: **{feats.get('message_history', 0)}** messages · ⚡ API: **{cfg['limits'].get('api_calls_per_day', 0)}**/day"
+            )
+        self.add_text("\n\n".join(tier_summaries))
+        self.add_separator(discord.SeparatorSpacing.small)
+
+        self.add_text(
+            "### 🎁 Discounts & Payment\n"
+            f"• **Yearly Billing:** Save {YEARLY_DISCOUNT}% on any annual plan\n"
+            f"• **Activation:** Contact <@{OWNER_ID}> via Discord DM · Payment accepted via **UPI**."
+        )
+        self.add_footer(f"Requested by {self.requester.display_name}")
+        self.add_row(DismissButton(user_id=self.requester.id))
+
+
+class VanityCardView(NexoraView):
+    """Components V2 card displaying vanity role mapping and configuration."""
+
+    def __init__(self, guild: discord.Guild, doc: dict, requester: discord.abc.User, timeout: float = 180):
+        super().__init__(user_id=requester.id, color=PREMIUM_COLOR, timeout=timeout)
+        self.guild = guild
+        self.doc = doc
+        self.requester = requester
+        self._build()
+
+    def _build(self):
+        self.clear_container()
+        g = self.guild
+        tier = (self.doc.get("tier") or "FREE").upper()
+        cfg = TIER_CONFIG.get(tier, TIER_CONFIG["FREE"])
+        roles = self.doc.get("vanity_roles", {})
+        settings = self.doc.get("vanity_settings", {})
+        slots = cfg["features"].get("vanity_roles", 0)
+        slots_str = "Unlimited" if slots == -1 else str(slots)
+
+        header = (
+            f"# 🎭 Vanity Roles · {g.name}\n"
+            f"> Tier: **{cfg['display_name']}** · Slots Used: **{len(roles)} / {slots_str}**"
+        )
+        self.add_section(header, thumbnail_url=str(g.icon.url) if g.icon else None)
+        self.add_separator(discord.SeparatorSpacing.small)
+
+        meta = (
+            f"• **Match Mode:** `{settings.get('match_mode', 'substring')}`\n"
+            f"• **Priority:** `{settings.get('priority_mode', 'longest_first')}`\n"
+            f"• **Logging:** `{'Enabled' if settings.get('log_enabled') else 'Disabled'}`"
+        )
+        self.add_text("### ⚙️ Engine Settings\n" + meta)
+        self.add_separator(discord.SeparatorSpacing.small)
+
+        if roles:
+            role_lines = []
+            for kw, rid in roles.items():
+                r = g.get_role(int(rid))
+                mention_str = r.mention if r else f"~~`{rid}`~~ (Deleted)"
+                role_lines.append(f"• `{kw}` ➔ {mention_str}")
+            self.add_text(f"### 🔗 Configured Keyword Mappings ({len(roles)})\n" + "\n".join(role_lines))
+        else:
+            self.add_text("### 🔗 Configured Keyword Mappings\n> No vanity keywords mapped yet. Use `/vanity_add` to create one.")
+
+        self.add_footer("Nexora Premium · Roles automatically sync to custom user statuses")
+        self.add_row(DismissButton(user_id=self.requester.id))
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -378,72 +519,9 @@ class Premium(commands.Cog):
     )
     @commands.guild_only()
     async def premium_status(self, ctx: commands.Context):
-        await ctx.defer()
-        doc  = await self.get_doc(ctx.guild.id)
-        tier = (doc.get("tier", "FREE") or "FREE").upper()
-
-        if tier not in ("GRANDFATHERED",) and _is_expired(doc):
-            tier = "FREE"
-
-        cfg     = TIER_CONFIG.get(tier, TIER_CONFIG["FREE"])
-        is_prem = tier in PAID_TIERS and not _is_expired(doc)
-
-        embed = discord.Embed(
-            title=f"{cfg['emoji']}  {ctx.guild.name}",
-            color=cfg["color"],
-            timestamp=utcnow(),
-        )
-        if ctx.guild.icon:
-            embed.set_thumbnail(url=ctx.guild.icon.url)
-
-        # ── Main status row ────────────────────────────────────────────────────
-        embed.add_field(name="📦 Tier",    value=cfg["display_name"], inline=True)
-        embed.add_field(name="✅ Active", value="Yes" if is_prem else "No · Free tier", inline=True)
-        embed.add_field(name="🎭 Vanity",  value=_vanity_slots(tier) + " slots", inline=True)
-
-        # ── Subscription details ───────────────────────────────────────────────
-        if doc:
-            embed.add_field(name="🕐 Expires", value=_fmt_expiry(doc), inline=True)
-
-            purchased_by = doc.get("purchased_by")
-            if purchased_by:
-                user = self.bot.get_user(int(purchased_by))
-                embed.add_field(
-                    name="🛒 Purchased By",
-                    value=user.mention if user else f"`{purchased_by}`",
-                    inline=True,
-                )
-
-            purchased_at = _parse_dt(doc.get("purchased_at"))
-            if purchased_at:
-                ts = int(purchased_at.timestamp())
-                embed.add_field(name="📅 Since", value=f"<t:{ts}:D>", inline=True)
-
-            if doc.get("notes"):
-                embed.add_field(name="📝 Notes", value=doc["notes"], inline=False)
-
-        # ── Features for current tier ──────────────────────────────────────────
-        feats = cfg["features"]
-        feat_lines = [_feature_row(k, v) for k, v in feats.items()]
-        # split into two columns
-        half = (len(feat_lines) + 1) // 2
-        embed.add_field(name="🔓 Features", value="\n".join(feat_lines[:half]) or "—", inline=True)
-        if feat_lines[half:]:
-            embed.add_field(name="\u200b",   value="\n".join(feat_lines[half:]),        inline=True)
-            embed.add_field(name="\u200b",   value="\u200b",                            inline=True)
-
-        if not is_prem:
-            embed.add_field(
-                name="🚀 Upgrade",
-                value=(
-                    "Premium is optional and core commands stay available on the free tier.\n"
-                    f"Use `/premium_price` to compare plans, or contact <@{OWNER_ID}> when ready."
-                ),
-                inline=False,
-            )
-
-        embed.set_footer(text="Nexora Premium  ·  Contact owner to subscribe")
-        await ctx.send(embed=embed, view=PremiumActionsView())
+        doc = await self.get_doc(ctx.guild.id)
+        view = PremiumStatusCardView(ctx.guild, doc, ctx.author)
+        await send_view(ctx, view)
 
     # ── n!set_premium (owner only) ────────────────────────────────────────────
 
@@ -533,76 +611,8 @@ class Premium(commands.Cog):
         aliases=["plans", "upgrade"],
     )
     async def premium_price(self, ctx: commands.Context):
-        embed = discord.Embed(
-            title="💎 Nexora Premium Plans",
-            description=(
-                f"To subscribe, contact <@{OWNER_ID}> with your server ID and desired tier.\n"
-                f"Payment via **UPI**.\n\u200b"
-            ),
-            color=discord.Color.gold(),
-            timestamp=utcnow(),
-        )
-
-        # Paid tiers only
-        for key in ("BASIC", "PRO", "ENTERPRISE", "CUSTOM"):
-            cfg      = TIER_CONFIG[key]
-            price    = cfg["price"]
-            feats    = cfg["features"]
-
-            if price is None:
-                price_str = "Negotiated"
-                yearly    = "Negotiated"
-            else:
-                yearly_price = round(price * 12 * (1 - YEARLY_DISCOUNT / 100), 2)
-                price_str    = f"${price}/mo"
-                yearly       = f"${yearly_price}/yr  *(save {YEARLY_DISCOUNT}%)*"
-
-            slots     = feats.get("vanity_roles", 0)
-            slots_str = "Unlimited" if slots == -1 else str(slots)
-            history   = feats.get("message_history", 0)
-            calls     = cfg["limits"].get("api_calls_per_day", 0)
-            calls_str = "Unlimited" if calls == -1 else str(calls)
-
-            # Build feature list
-            feat_lines = []
-            feat_lines.append(f"🎭 **{slots_str}** vanity role{'s' if slots != 1 else ''}")
-            feat_lines.append(f"📜 **{history}** message history")
-            feat_lines.append(f"⚡ **{calls_str}** API calls/day")
-            for fkey in ("custom_responses", "priority_support", "analytics",
-                         "auto_moderation", "scheduled_messages"):
-                if feats.get(fkey):
-                    feat_lines.append(f"✅ {FEATURE_LABELS[fkey]}")
-            if key == "CUSTOM":
-                for fkey in ("voice_support", "image_generation", "music_integration",
-                             "web_dashboard", "early_access"):
-                    if feats.get(fkey):
-                        feat_lines.append(f"✅ {FEATURE_LABELS[fkey]}")
-
-            value = (
-                f"**{price_str}**  ·  {yearly}\n"
-                + "\n".join(feat_lines)
-            )
-            embed.add_field(
-                name=f"{cfg['display_name']}",
-                value=value,
-                inline=True,
-            )
-
-        # Discounts
-        bulk_lines = "\n".join(
-            f"• **{k} servers** → {v}% off" for k, v in BULK_DISCOUNTS.items()
-        )
-        embed.add_field(
-            name="🎁 Discounts",
-            value=(
-                f"📅 **Yearly** → {YEARLY_DISCOUNT}% off\n"
-                f"**Bulk (per server):**\n{bulk_lines}"
-            ),
-            inline=False,
-        )
-
-        embed.set_footer(text=f"Contact @{OWNER_ID} via Discord DM  ·  Payment: UPI")
-        await ctx.send(embed=embed, view=PremiumActionsView())
+        view = PremiumCatalogCardView(ctx.author)
+        await send_view(ctx, view)
 
     # ── n!vanity ───────────────────────────────────────────────────────────────
 
@@ -614,65 +624,13 @@ class Premium(commands.Cog):
     async def vanity(self, ctx: commands.Context):
         if not await self.is_premium(ctx.guild.id):
             return await ctx.send(
-                embed=discord.Embed(
-                    description=(
-                        "❌ **Premium required** for vanity roles.\n\n"
-                        f"Contact <@{OWNER_ID}> or use `n!premium_price` to upgrade."
-                    ),
-                    color=discord.Color.red(),
-                ),
+                "❌ **Premium required** for vanity roles. Use `/premium_price` to view upgrade plans.",
                 ephemeral=True,
             )
 
-        doc      = await self.get_doc(ctx.guild.id)
-        tier     = (doc.get("tier") or "FREE").upper()
-        cfg      = TIER_CONFIG.get(tier, TIER_CONFIG["FREE"])
-        roles    = doc.get("vanity_roles", {})
-        settings = doc.get("vanity_settings", {})
-        slots    = cfg["features"].get("vanity_roles", 0)
-        slots_str = "Unlimited" if slots == -1 else str(slots)
-
-        embed = discord.Embed(
-            title="🎭 Vanity Roles",
-            color=cfg["color"],
-            timestamp=utcnow(),
-        )
-
-        embed.add_field(name="📦 Tier",        value=cfg["display_name"],               inline=True)
-        embed.add_field(name="🎰 Slots Used",  value=f"{len(roles)} / {slots_str}",     inline=True)
-        embed.add_field(name="🔍 Match Mode",  value=settings.get("match_mode", "substring"), inline=True)
-
-        embed.add_field(
-            name="⚙️ Settings",
-            value=(
-                f"Priority: `{settings.get('priority_mode', 'longest_first')}`\n"
-                f"Case Sensitive: `{settings.get('case_sensitive', False)}`\n"
-                f"Logging: `{'enabled' if settings.get('log_enabled') else 'disabled'}`"
-            ),
-            inline=True,
-        )
-
-        if roles:
-            lines = []
-            for keyword, role_id in roles.items():
-                role = ctx.guild.get_role(int(role_id))
-                lines.append(
-                    f"`{keyword}` → {role.mention if role else f'~~`{role_id}`~~ (deleted)'}"
-                )
-            embed.add_field(
-                name=f"🔗 Keyword → Role ({len(roles)})",
-                value="\n".join(lines) or "—",
-                inline=False,
-            )
-        else:
-            embed.add_field(
-                name="🔗 Keyword → Role",
-                value="No vanity roles configured yet.",
-                inline=False,
-            )
-
-        embed.set_footer(text="Nexora Premium  ·  Roles auto-assign when status contains the keyword")
-        await ctx.send(embed=embed)
+        doc = await self.get_doc(ctx.guild.id)
+        view = VanityCardView(ctx.guild, doc, ctx.author)
+        await send_view(ctx, view)
 
     # ── n!premium_list (owner only) ────────────────────────────────────────────
 
@@ -719,4 +677,4 @@ class Premium(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Premium(bot))
-    logger.info("Loaded Premium")
+    logger.debug("Loaded Premium")

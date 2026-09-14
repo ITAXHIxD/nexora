@@ -10,6 +10,14 @@ from io import BytesIO
 from PIL import Image
 from typing import Optional, List
 
+from utils.ui import (
+    BRAND_COLOR,
+    SUCCESS_COLOR,
+    NexoraView,
+    DismissButton,
+    send_view,
+)
+
 logger = logging.getLogger(__name__)
 
 # ================= REGEX =================
@@ -109,24 +117,56 @@ class StickerModal(discord.ui.Modal):
 
 # ================= VIEW =================
 
-class StealView(discord.ui.View):
-    def __init__(self, ctx, image: bytes, name: str, animated: bool):
-        super().__init__(timeout=60)
+class StealLayoutView(NexoraView):
+    """Components V2 asset manager for importing emojis and stickers."""
+
+    def __init__(self, ctx: commands.Context, image: bytes, name: str, animated: bool, preview_url: str):
+        super().__init__(bot=ctx.bot, user_id=ctx.author.id, color=BRAND_COLOR, timeout=120)
         self.ctx = ctx
         self.image = image
         self.name = name
         self.animated = animated
+        self.preview_url = preview_url
+        self._build()
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.ctx.author.id:
-            await interaction.response.send_message(
-                "❌ You didn’t run this command.", ephemeral=True
-            )
-            return False
-        return True
+    def _build(self):
+        self.clear_container()
+        format_badge = "🎞️ **Animated GIF**" if self.animated else "🖼️ **Static Image**"
+        header = (
+            f"# 🎨 Asset Importer · Preview\n"
+            f"> **Suggested Name:** `{self.name}` · Type: {format_badge}\n"
+            f"> Ready to convert and add to **{self.ctx.guild.name}**."
+        )
+        self.add_section(header, thumbnail_url=self.preview_url)
+        self.add_separator(discord.SeparatorSpacing.small)
 
-    @discord.ui.button(label="Add as Emoji", style=discord.ButtonStyle.green)
-    async def emoji_button(self, interaction: discord.Interaction, _):
+        note = (
+            "### 💡 Choose Import Mode\n"
+            "• **Custom Emoji:** Compresses and installs directly into server emoji slots.\n"
+            "• **Custom Sticker:** Scales and installs as a server sticker *(static only)*."
+        )
+        self.add_text(note)
+        self.add_footer(f"Requested by {self.ctx.author.display_name} · Permissions: Manage Expressions")
+
+        btn_emoji = discord.ui.Button(
+            label="Add as Emoji",
+            emoji="😃",
+            style=discord.ButtonStyle.success,
+        )
+        btn_emoji.callback = self._on_emoji
+
+        btn_sticker = discord.ui.Button(
+            label="Add as Sticker",
+            emoji="🏷️",
+            style=discord.ButtonStyle.primary,
+            disabled=self.animated,
+        )
+        btn_sticker.callback = self._on_sticker
+
+        dismiss = DismissButton(user_id=self.ctx.author.id)
+        self.add_row(btn_emoji, btn_sticker, dismiss)
+
+    async def _on_emoji(self, interaction: discord.Interaction):
         async def create(inter, name):
             try:
                 data = compress_emoji(self.image)
@@ -135,19 +175,18 @@ class StealView(discord.ui.View):
                     image=data,
                     reason=f"Requested by {self.ctx.author}"
                 )
-                await inter.followup.send(f"✅ Created {emoji}", ephemeral=True)
+                await inter.followup.send(f"✅ Successfully created custom emoji {emoji} (`:{emoji.name}:`)!", ephemeral=True)
             except discord.HTTPException as e:
-                await inter.followup.send(f"❌ {e}", ephemeral=True)
+                await inter.followup.send(f"❌ Failed to create emoji: {e}", ephemeral=True)
 
         await interaction.response.send_modal(
             EmojiNameModal(self.name, create)
         )
 
-    @discord.ui.button(label="Add as Sticker", style=discord.ButtonStyle.blurple)
-    async def sticker_button(self, interaction: discord.Interaction, _):
+    async def _on_sticker(self, interaction: discord.Interaction):
         if self.animated:
             return await interaction.response.send_message(
-                "❌ Animated images can’t be stickers.",
+                "❌ Animated images cannot be uploaded as stickers.",
                 ephemeral=True
             )
 
@@ -164,11 +203,11 @@ class StealView(discord.ui.View):
                     reason=f"Requested by {self.ctx.author}"
                 )
                 await inter.followup.send(
-                    f"✅ Created sticker `{sticker.name}`",
+                    f"✅ Successfully created server sticker **{sticker.name}**!",
                     ephemeral=True
                 )
             except discord.HTTPException as e:
-                await inter.followup.send(f"❌ {e}", ephemeral=True)
+                await inter.followup.send(f"❌ Failed to create sticker: {e}", ephemeral=True)
 
         await interaction.response.send_modal(
             StickerModal(self.name, create)
@@ -262,18 +301,8 @@ class Steal(commands.Cog):
         if not data:
             return await ctx.send("❌ Failed to download image.")
 
-        embed = discord.Embed(
-            title="🎨 Choose Action",
-            description=f"**Name:** `{clean_name(name)}`\n"
-                        f"**Animated:** {'Yes' if animated else 'No'}",
-            color=discord.Color.blue()
-        )
-        embed.set_image(url=url)
-
-        await ctx.send(
-            embed=embed,
-            view=StealView(ctx, data, clean_name(name), animated)
-        )
+        view = StealLayoutView(ctx, data, clean_name(name), animated, preview_url=url)
+        await send_view(ctx, view)
 
 
 async def setup(bot: commands.Bot):

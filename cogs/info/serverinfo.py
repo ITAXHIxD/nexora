@@ -1,54 +1,144 @@
+"""
+cogs/info/serverinfo.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Interactive Components V2 Server Information & Analytics Dashboard
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+
 import logging
+from datetime import datetime, timezone
+
 import discord
-from discord.ext import commands
 from discord import app_commands
-from datetime import datetime
+from discord.ext import commands
+
+from utils.ui import (
+    BRAND_COLOR,
+    PURPLE_COLOR,
+    NexoraView,
+    DismissButton,
+    progress_bar,
+    send_view,
+    ts_format,
+)
+
 logger = logging.getLogger(__name__)
+
+
+class ServerInfoView(NexoraView):
+    """Components V2 dashboard for server metrics and features."""
+
+    def __init__(self, guild: discord.Guild, requester: discord.abc.User, timeout: float = 180):
+        super().__init__(
+            user_id=requester.id,
+            color=PURPLE_COLOR,
+            timeout=timeout,
+        )
+        self.guild = guild
+        self.requester = requester
+        self._build()
+
+    def _build(self):
+        self.clear_container()
+        g = self.guild
+
+        # Counts
+        bot_count = sum(1 for m in g.members if m.bot)
+        human_count = max(0, g.member_count - bot_count)
+        online_count = sum(1 for m in g.members if m.status != discord.Status.offline)
+        human_pct = (human_count / max(1, g.member_count)) * 100
+
+        text_chans = len(g.text_channels)
+        voice_chans = len(g.voice_channels)
+        stage_chans = len(g.stage_channels)
+        cat_count = len(g.categories)
+
+        # Boost tier display
+        boost_tier_name = f"Level {g.premium_tier}" if g.premium_tier > 0 else "No Level"
+        boost_summary = f"🚀 **{boost_tier_name}** · `{g.premium_subscription_count or 0}` Boosts"
+
+        icon_url = str(g.icon.url) if g.icon else None
+
+        # ── Header Section ────────────────────────────────────────────────────
+        header_text = (
+            f"# 🏰 {g.name}\n"
+            f"> Created {ts_format(g.created_at, 'D')} ({ts_format(g.created_at, 'R')})\n"
+            f"👑 **Owner:** {g.owner.mention if g.owner else 'Unknown'} · **ID:** `{g.id}`"
+        )
+        self.add_section(header_text, thumbnail_url=icon_url)
+        self.add_separator(discord.SeparatorSpacing.small)
+
+        # ── Member Demographics Block ─────────────────────────────────────────
+        bar = progress_bar(human_count, max_val=max(1, g.member_count), length=8)
+        demographics = (
+            "### 👥 Member Demographics\n"
+            f"• **Total Population:** `{g.member_count:,}` members\n"
+            f"• **Humans vs Bots:** `{bar}` **{human_pct:.0f}%** Humans\n"
+            f"  └ 👤 Humans: `{human_count:,}` · 🤖 Bots: `{bot_count:,}`\n"
+            f"• **Currently Online:** 🟢 `{online_count:,}` members active"
+        )
+        self.add_text(demographics)
+        self.add_separator(discord.SeparatorSpacing.small)
+
+        # ── Guild Assets & Features Block ─────────────────────────────────────
+        assets = (
+            "### 📊 Channels & Assets\n"
+            f"• **Channels:** `{text_chans}` Text · `{voice_chans}` Voice"
+            + (f" · `{stage_chans}` Stage" if stage_chans else "")
+            + f" · `{cat_count}` Categories\n"
+            f"• **Roles & Emojis:** `{len(g.roles)}` roles · `{len(g.emojis)}` emojis\n"
+            f"• **Nitro Status:** {boost_summary}"
+        )
+        self.add_text(assets)
+
+        # ── Footer ────────────────────────────────────────────────────────────
+        self.add_footer(
+            f"Requested by {self.requester.display_name} · Verification: {str(g.verification_level).title()}"
+        )
+
+        # ── Interactive Buttons ───────────────────────────────────────────────
+        buttons = []
+        if g.icon:
+            buttons.append(
+                discord.ui.Button(
+                    label="Server Icon",
+                    emoji="🖼️",
+                    style=discord.ButtonStyle.link,
+                    url=g.icon.url,
+                )
+            )
+        if g.banner:
+            buttons.append(
+                discord.ui.Button(
+                    label="Server Banner",
+                    emoji="🌆",
+                    style=discord.ButtonStyle.link,
+                    url=g.banner.url,
+                )
+            )
+
+        dismiss = DismissButton(user_id=self.requester.id)
+        buttons.append(dismiss)
+        self.add_row(*buttons)
+
+
 class ServerInfo(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.hybrid_command(name="serverinfo", description="View server information.",aliases=['si'])
+    @commands.hybrid_command(
+        name="serverinfo",
+        description="🏰 View comprehensive server information and statistics",
+        aliases=["si"],
+    )
     async def serverinfo(self, ctx: commands.Context):
-        # We can use ctx.guild directly as hybrid commands won't run in DMs by default
-        guild = ctx.guild
-        
-        if not guild:
-            await ctx.reply("❌ This command must be used in a server!", ephemeral=True)
+        if not ctx.guild:
+            await ctx.send("❌ This command must be used within a server.", ephemeral=True)
             return
 
-        text_channels = len(guild.text_channels)
-        voice_channels = len(guild.voice_channels)
-        categories = len(guild.categories)
-        bot_count = sum(1 for m in guild.members if m.bot)
-        human_count = guild.member_count - bot_count
-        # The presence intent in your bot.py allows this to work accurately
-        online_members = sum(1 for m in guild.members if m.status != discord.Status.offline)
+        view = ServerInfoView(ctx.guild, ctx.author)
+        await send_view(ctx, view)
 
-        # Get the embed color from your bot_config
-        try:
-            embed_color = int(self.bot.bot_config['ui_settings']['embed_color'], 16)
-        except (KeyError, ValueError):
-            embed_color = 0x5DADE2 # Fallback color
-            
-        embed = discord.Embed(
-            title=guild.name,
-            description="Server information",
-            color=embed_color,
-            timestamp=datetime.now()
-        )
-        if guild.icon:
-            embed.set_thumbnail(url=guild.icon.url)
-            
-        embed.add_field(name="Owner", value=guild.owner.mention if guild.owner else "Unknown", inline=True)
-        # Use a dynamic timestamp for a better user experience
-        embed.add_field(name="Created", value=f"<t:{int(guild.created_at.timestamp())}:R>", inline=True)
-        embed.add_field(name="Members", value=f"Total: {guild.member_count}\nHumans: {human_count}\nBots: {bot_count}\nOnline: {online_members}", inline=True)
-        embed.add_field(name="Channels", value=f"Text: {text_channels}\nVoice: {voice_channels}\nCategories: {categories}", inline=True)
-        embed.add_field(name="Roles", value=f"{len(guild.roles)}", inline=True)
-        embed.set_footer(text=f"Requested by {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
-
-        await ctx.send(embed=embed)
 
 async def setup(bot):
     await bot.add_cog(ServerInfo(bot))
