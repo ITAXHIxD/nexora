@@ -288,7 +288,7 @@ class TODView(NexoraView):
         btn_random.callback = self._on_choose_random
 
         self.add_row(btn_truth, btn_dare, btn_random, DismissButton(user_id=self.challenger.id))
-        self.add_footer("Both Truth and Dare can be played on self or friends · 180s timeout")
+        self.add_footer("Funny truths · chaotic dares · two rerolls · zero boring energy")
 
     def _show_prompt(self, p_type: str, prompt: Optional[str] = None):
         self.prompt_type = p_type
@@ -302,7 +302,7 @@ class TODView(NexoraView):
         emoji = "💬" if p_type == "Truth" else "⚡"
         self._color = BRAND_COLOR if p_type == "Truth" else ERROR_COLOR
 
-        rating_labels = {"pg": "🟢 PG", "teen": "🟡 TEEN", "spicy": "🔴 SPICY"}
+        rating_labels = {"pg": "🟢 WARM-UP", "teen": "🟡 CHAOS MODE", "spicy": "🔴 UNHINGED MODE"}
         r_label = rating_labels.get(self.rating, "🟡 TEEN")
 
         if self.challenger.id == self.target.id:
@@ -436,7 +436,7 @@ class TODView(NexoraView):
             f"# 🏆 Challenge Completed!\n"
             f"> {self.target.mention} successfully answered/completed their **{self.prompt_type}**!\n\n"
             f"• **Task:** *\"{self.current_prompt}\"*\n"
-            f"• **Respect:** +1000 Aura Points ✨"
+            f"• **Reward:** +1000 imaginary Aura ✨"
         )
         self.add_section(header, thumbnail_url=str(self.target.display_avatar.url))
         self.add_separator(discord.SeparatorSpacing.small)
@@ -660,7 +660,7 @@ class TruthOrDare(commands.Cog):
 
     @commands.hybrid_command(
         name="truth",
-        description="💬 Get a direct Truth prompt for yourself or challenge someone",
+        description="💬 Get a genuinely chaotic Truth prompt or challenge a friend",
     )
     @app_commands.describe(
         target="Member to challenge (leave empty to play yourself)",
@@ -668,8 +668,8 @@ class TruthOrDare(commands.Cog):
     )
     @app_commands.choices(
         rating=[
-            app_commands.Choice(name="🟢 PG (Family Friendly)", value="pg"),
-            app_commands.Choice(name="🟡 Teen (Party & Secrets)", value="teen"),
+            app_commands.Choice(name="🟢 Warm-up (Funny & Friendly)", value="pg"),
+            app_commands.Choice(name="🟡 Chaos Mode (Party & Confessions)", value="teen"),
             app_commands.Choice(name="🔴 Unhinged Mode (Bold Truths)", value="spicy"),
         ]
     )
@@ -688,7 +688,7 @@ class TruthOrDare(commands.Cog):
 
     @commands.hybrid_command(
         name="dare",
-        description="⚡ Get a direct Dare prompt for yourself or challenge someone",
+        description="⚡ Roll a wild Dare or challenge a friend to do it",
     )
     @app_commands.describe(
         target="Member to challenge (leave empty to play yourself)",
@@ -698,7 +698,7 @@ class TruthOrDare(commands.Cog):
         rating=[
             app_commands.Choice(name="🟢 PG (Family Friendly)", value="pg"),
             app_commands.Choice(name="🟡 Chaos Mode (Party Fun)", value="teen"),
-            app_commands.Choice(name="🔴 Spicy (Wild Challenges)", value="spicy"),
+            app_commands.Choice(name="🔴 Unhinged Mode (Bold & Flirty)", value="spicy"),
         ]
     )
     @commands.guild_only()
