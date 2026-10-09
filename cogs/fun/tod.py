@@ -303,7 +303,7 @@ class TODView(NexoraView):
         self._color = BRAND_COLOR if p_type == "Truth" else ERROR_COLOR
 
         rating_labels = {"pg": "🟢 WARM-UP", "teen": "🟡 CHAOS MODE", "spicy": "🔴 UNHINGED MODE"}
-        r_label = rating_labels.get(self.rating, "🟡 TEEN")
+        r_label = rating_labels.get(self.rating, "🟡 CHAOS MODE")
 
         if self.challenger.id == self.target.id:
             header = (
@@ -696,8 +696,8 @@ class TruthOrDare(commands.Cog):
     )
     @app_commands.choices(
         rating=[
-            app_commands.Choice(name="🟢 PG (Family Friendly)", value="pg"),
-            app_commands.Choice(name="🟡 Chaos Mode (Party Fun)", value="teen"),
+            app_commands.Choice(name="🟢 Warm-up (Funny & Friendly)", value="pg"),
+            app_commands.Choice(name="🟡 Chaos Mode (Party & Confessions)", value="teen"),
             app_commands.Choice(name="🔴 Unhinged Mode (Bold & Flirty)", value="spicy"),
         ]
     )
