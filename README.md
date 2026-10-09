@@ -6,21 +6,6 @@ Nexora is a modular, all-in-one Discord bot built with Python and `discord.py`. 
 > **Prefix:** `n!` (the bot also responds to mentions; slash commands are available where registered).  
 > **Help:** `n!help` or `/help`
 
-## ✨ Standout Commands — Try These First
-
-These are some of Nexora's more distinctive commands, especially the interactive ones:
-
-| Command | What makes it special |
-|---|---|
-| **`n!randomavatar`** · `n!rav` · `/randomavatar` | 🎲 Picks a random server member and shows their high-resolution avatar and profile. Use the buttons to reroll, switch between **Avatar/Profile**, or dismiss the view. |
-| **`n!spotify`** · `n!np` · `n!nowplaying` · `n!spt` · `/spotify` | 🎧 Opens an interactive Spotify now-playing card for you or another member, with album art, track progress, a Spotify link, refresh, and a lyrics-search shortcut. |
-| **`n!avatar`** · `/avatar` | 🖼️ Explore an avatar in high resolution, with interactive tabs for profile details, banner/server avatar where available, and download links. |
-| **`n!afk`** · `/afk` | 💤 Set an AFK status and get notified when people mention you; supports the bot's configured AFK options. |
-| **`n!help` · `/help`** | 🧭 Browse command categories, open command details, and find commands through the interactive help menu. |
-
-> **Quick tip:** Prefix commands use `n!`; slash-command availability depends on what has been registered with Discord. Interactive commands may show buttons or menus after you run them.
-
-
 ## Features
 
 ### 🛡️ Moderation and server safety
@@ -39,13 +24,13 @@ These are some of Nexora's more distinctive commands, especially the interactive
 - Bot information and diagnostics/help navigation.
 
 ### ⚙️ Utilities
-- **`afk`** status with prefix and slash-command support, optional global AFK, status inspection, manual removal, and mention notifications.
+- AFK status with prefix and slash-command support, optional global AFK, status inspection, manual removal, and mention notifications.
 - Polls, reminders, calculator, birthday/intro utilities, and emoji/sticker stealing utilities.
-- **`spotify`** (aliases: `np`, `nowplaying`, `spt`) for live Spotify activity and interactive playback displays.
+- Spotify activity viewing and related interactive displays.
 
 ### ℹ️ Information
 - User, server, role, channel, invite, and bot information.
-- **`avatar`** for high-resolution avatar/profile media, and **`randomavatar`** (alias: `rav`) to discover a random server member with reroll and profile tabs.
+- Avatar and random-avatar tools.
 
 ### 🎮 Games
 - Rock Paper Scissors, Tic-Tac-Toe, Connect Four, number guessing, and game statistics.
