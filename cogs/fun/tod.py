@@ -35,191 +35,198 @@ logger = logging.getLogger(__name__)
 
 TRUTHS = {
     "pg": [
-        "What is the most embarrassing thing your parents or family ever caught you doing?",
-        "If you could trade lives with anyone in this server for 24 hours, who would it be and why?",
-        "What is the weirdest food combination you secretly love that everyone else finds gross?",
-        "Have you ever pretended to be sick or asleep just to avoid hanging out with someone?",
-        "What is the dumbest argument you have ever had with someone on the internet?",
-        "What is your ultimate guilty pleasure song or video that you would never admit publicly?",
-        "What is one weird habit you have when you are completely alone in your room?",
-        "If you were forced to delete every app on your phone except three, which three are staying?",
-        "What cartoon or video game character were you irrationally terrified of as a kid?",
-        "What is the most ridiculous excuse you ever gave a teacher or boss for being late or missing work?",
-        "Have you ever accidentally waved back at someone who was waving to the person behind you?",
-        "What is the single worst meal you have ever cooked or prepared with your own hands?",
-        "If you were an animal, what species would match your exact personality and morning mood?",
-        "Have you ever tripped in public and pretended to stretch or tie your shoe to play it off?",
-        "What is something you believed for way too long before finding out it was completely fake?",
-        "If you were forced to live inside a video game universe forever, which game are you choosing?",
-        "What is a popular movie, anime, or TV show that everyone loves but you secretly think is pure garbage?",
-        "Have you ever practiced an argument in the shower with full dramatic hand gestures and facial expressions?",
-        "What is the most useless talent or party trick you possess that serves zero real-world purpose?",
-        "If your pet (or a pet you know) could speak for 5 minutes, what is the first thing they would expose you for?",
-        "What is the funniest or weirdest WiFi network name you have ever connected to or seen?",
-        "If you were arrested with zero context given, what would your friends automatically assume you did?",
-        "Have you ever replied to a message with 'sorry just seeing this' when you literally saw it 3 weeks ago?",
-        "What is your spirit vegetable and why does it represent your current life stage?",
-        "If you had a permanent warning label stamped on you, what would the fine print say?",
-        "What is the weirdest or most chaotic dream you remember having recently?",
-        "Have you ever eaten something that dropped on the floor well past the 5-second rule?",
-        "What is the longest you have gone without showering during an intense gaming or lazy binge?",
-        "If you won 1 million dollars tomorrow, what is the first completely unnecessary thing you would buy?",
-        "What is your least favorite daily chore that you will actively procrastinate on for days?",
-        "Have you ever tried to unlock your front door using your car remote key fob?",
-        "What board game or video game ruins friendships the fastest in your experience?",
-        "If your life was turned into a comedy sitcom, what would the season finale be about?",
-        "What is the worst fashion trend or haircut you unironically rocked in the past?",
-        "Have you ever sung at the top of your lungs in your car only to notice someone staring at a red light?",
-        "What is your most controversial hot take about food or pizza toppings?",
-        "If you could have any completely useless superpower, what would you choose?",
-        "What is your most irrational fear that makes zero logical sense to anyone else?",
-        "Have you ever laughed at a completely inappropriate moment and had to cough to cover it up?",
+        "What's a completely pointless hill you'll die on?",
+        "Which fictional universe would reject you within five minutes, and why?",
+        "What's the weirdest thing you would confidently win a debate about?",
+        "What tiny inconvenience turns you into a dramatic supervillain?",
+        "What's your most irrational, absolutely non-negotiable food opinion?",
+        "If your personality were a patch note, what would the latest update say?",
+        "What's a skill you have that is impressive for approximately zero seconds?",
+        "Which three objects would you bring to a very badly planned apocalypse?",
+        "What's the most NPC thing you've done in real life?",
+        "If your pet or favourite animal could roast you, what would its opening line be?",
+        "What's a popular thing you still don't understand the hype around?",
+        "Which cartoon character would be the worst roommate?",
+        "What's the most ridiculous thing you'd buy if you had to spend ₹1,000 today?",
+        "What's your most useless superpower, and how would you abuse it?",
+        "Which everyday task would you make illegal if you became king for a day?",
+        "What's the funniest misunderstanding you've had that you can share publicly?",
+        "What would your warning label say if people had to read it before talking to you?",
+        "What food could you defend like a lawyer in court?",
+        "If your life had loading-screen tips, what would tip number one say?",
+        "What's the weirdest name you'd give a Wi-Fi network?",
+        "Which game would expose your real personality the fastest?",
+        "What's the most dramatic reaction you've had to a minor inconvenience?",
+        "What's one thing you were confidently wrong about for an embarrassing amount of time?",
+        "If aliens watched you for a day, what would confuse them the most?",
+        "What would be your completely unnecessary signature move?",
+        "What's the funniest thing your brain has made you forget at the worst possible moment?",
+        "Which fictional villain has a point, even if their methods are terrible?",
+        "What's the most cursed food combination you'd actually try?",
+        "If your week were a movie genre, what genre would it be right now?",
+        "What's a harmless conspiracy theory you could invent and almost sell to people?"
     ],
     "teen": [
-        "What is the biggest lie you have ever told on Discord or social media to sound cooler?",
-        "Who in this server would you trust the least with your unlocked phone and private DMs?",
-        "What is the cringiest message you ever sent to someone you had a crush on that keeps you awake at night?",
-        "Have you ever ghosted someone because you found a small petty flaw you couldn't get over? What was it?",
-        "What is something you searched up on Google or YouTube that you immediately cleared from your history?",
-        "If you had to date someone currently active in this text or voice channel, who are you picking?",
-        "What is the biggest secret you have kept from your best friend that would shock them?",
-        "Have you ever stalked someone's profile, status, or Spotify listening activity for more than 20 minutes straight?",
-        "What is the worst outfit or haircut you ever wore where you genuinely thought you were the main character?",
-        "Have you ever blamed a pet, sibling, or 'bad internet' for something that was 100% your own fault?",
-        "Who was your very first fictional character or anime crush that you were obsessed with?",
-        "What is the most petty reason you ever stopped being friends or talking with someone?",
-        "What is the highest daily screen time you have ever clocked on your phone in a single day?",
-        "Have you ever muted a group chat or server because you couldn't stand one specific person's messages?",
-        "What is something you pretend to dislike just because it's popular or cool to hate on it?",
-        "Have you ever accidentally sent a screenshot of a chat to the exact person the screenshot was about?",
-        "What is the most desperate thing you have ever done to get someone's attention online?",
-        "If your camera roll was projected onto a big screen right now, how cooked are you on a scale of 1 to 10?",
-        "What is the cringiest username, gamertag, or email address you ever unironically used?",
-        "Have you ever faked having bad WiFi or microphone lag just to escape an awkward voice call?",
-        "Who in this server gives off the most chaotic energy and keeps you on edge?",
-        "Have you ever pretended to fall asleep while texting someone just to end the conversation?",
-        "If you had to delete either Discord, TikTok/Reels, or YouTube forever, which one goes first?",
-        "Have you ever stalked an ex or someone you disliked from a secret burner or alt account?",
-        "What is the weirdest thing you do when you are home completely alone with nobody watching?",
-        "Have you ever lied about your age, location, or hobbies on the internet?",
-        "Who was the last person you looked up on Instagram, Twitter, or Discord search bar?",
-        "What is the most dramatic meltdown you ever had over a video game loss or minor inconvenience?",
-        "Have you ever talked trash about someone in this server and then acted super friendly to them right after?",
-        "What is your biggest personal ick in people that immediately makes you lose interest?",
-        "Have you ever re-read your own text messages repeatedly after sending them just to admire how cool they sounded?",
-        "What is the longest amount of time you spent drafting a single text or DM before hitting send?",
-        "If you could read the DMs of any one person in this server for 5 minutes, whose DMs are you opening?",
-        "Have you ever unfriended or blocked someone without giving them any explanation whatsoever?",
-        "What is the most awkward or humiliating interaction you have had with a crush in real life?",
-        "What is the dumbest thing you ever bought with your own money that you immediately regretted?",
-        "If someone offered you $10,000 to never speak to your best friend again, would you take the money?",
-        "What is the cringiest trend or dance you secretly attempted in your room with the door locked?",
-        "Who in this server would survive the longest in a zombie apocalypse, and who dies within 5 minutes?",
+        "What's your most unserious red flag that your friends would absolutely confirm?",
+        "What's the boldest message you've typed and then deleted before sending?",
+        "What's your most embarrassing gaming moment that still deserves a replay?",
+        "What's a song you know every word to but would never put on aux first?",
+        "What's the pettiest reason you've ever lost an argument?",
+        "What's your most chaotic habit in group chats?",
+        "What's the funniest excuse you've used to dodge a plan?",
+        "What's one opinion about a game, anime, or show that would get you cooked here?",
+        "What's the most obvious hint you've ever completely failed to notice?",
+        "What's something you pretend to be good at until someone asks for proof?",
+        "What's your personal definition of being absolutely cooked?",
+        "What's your most embarrassing username era?",
+        "What's a green flag in a friend that deserves way more appreciation?",
+        "What's the most unserious thing that can instantly improve your mood?",
+        "What's your biggest 'I can fix it' moment that absolutely did not get fixed?",
+        "What's the weirdest thing you've done to procrastinate?",
+        "What's a trend you joined late and then defended like an original fan?",
+        "What's the most dramatic way you've ever reacted to losing a game?",
+        "What's something your friends tease you about because it's painfully accurate?",
+        "What's your most chaotic 2 a.m. thought that you can safely share?",
+        "What's a fictional character you would trust with your life, despite all evidence?",
+        "What's your most harmless delusion about your own talent?",
+        "What's the fastest way someone can make you lose an argument with one sentence?",
+        "What's a compliment you still remember because it caught you off guard?",
+        "What's a social situation where you instantly forget how to act normal?",
+        "What's the funniest thing you've done to look cool that had the opposite effect?",
+        "What would your enemies put in a presentation titled 'Why They're Like This'?",
+        "What's your strongest 'hear me out' opinion about a fictional character?",
+        "What's something you judge people for even though you do it too?",
+        "If the server gave you an award, what painfully specific category would you win?"
     ],
     "spicy": [
-        "Confess the initials of someone in this server (or Discord) who you secretly find attractive or have vibes with.",
-        "What is the boldest, most flirtatious, or unhinged DM you have ever sent to someone?",
-        "Have you ever flirted with someone just to get free stuff, game carries, Discord Nitro, or attention?",
-        "Rate your own flirting rizz from 1 to 10 with complete honesty, and give one example of your work.",
-        "What is the most romantic or embarrassing dream you've ever had about someone you know in real life?",
-        "Have you ever sent a risky photo or late-night text and immediately put your phone face down in pure panic?",
-        "If you had to go on a 24-hour date with one person in this server, who are you picking?",
-        "What is the quickest you have ever caught deep feelings for someone you barely knew?",
-        "Have you ever had a crush on someone your friend was actively dating or into?",
-        "What is your biggest secret turn-on or personality trait that instantly attracts you to someone?",
-        "What is the absolute worst date or romantic hangout you have ever experienced? Give the juicy details.",
-        "Have you ever stayed up until 4 AM texting someone and caught feelings that you later denied to everyone?",
-        "What is the biggest red flag you willingly ignored in someone just because you found them attractive?",
-        "Confess the most embarrassing pet name you have ever used or been called in a relationship.",
-        "Have you ever checked someone's follower count or profile before deciding if they were worth talking to?",
-        "What is the closest you have ever come to getting caught doing something intimate or forbidden?",
-        "If you were 100% guaranteed they would say yes, who would you ask out on a date right this second?",
-        "What is the most dramatic breakup or fight you have ever witnessed or been a part of?",
-        "Have you ever lied about your dating experience or past relationships to seem more experienced?",
-        "Who in this server gives off the biggest 'heartbreaker' energy?",
-        "What is the most cringe-inducing pickup line you have ever delivered or received?",
-        "Have you ever stalked someone's location on Snap Map, Find My, or Discord activity to see who they were with?",
-        "What is something you find extremely attractive that most other people would find weird or unconventional?",
-        "Have you ever led someone on just because you were bored and enjoyed the attention?",
-        "If the challenger could read your last 3 deleted messages or search history, what would they find out about you?",
+        "What's your most obvious tell when you like someone or really want their approval?",
+        "What's the smoothest line you've heard—and was it actually smooth?",
+        "What's your biggest green flag that you wish people noticed more?",
+        "What's a tiny thing someone can do that instantly makes them more attractive?",
+        "What's the boldest move you've made to get someone's attention?",
+        "What's your most embarrassing attempt at acting mysterious?",
+        "What's your biggest harmless ick that makes no logical sense?",
+        "What's a compliment you'd remember for years if the right person said it?",
+        "What's your ideal first-date vibe: chaotic adventure, cosy chill, or full main-character cinema?",
+        "What's the most obvious hint you've dropped and hoped someone would catch?",
+        "What's your flirting style: smooth, awkward, chaotic, or accidental comedian?",
+        "What's the most attractive personality trait that has nothing to do with looks?",
+        "What's one romantic cliché you secretly think is elite?",
+        "What's the most nervous you've been before sending a message?",
+        "What's your worst attempt at playing it cool around someone you liked?",
+        "What's a green flag that instantly beats a good first impression?",
+        "What's your funniest almost-confession or almost-sent message story?",
+        "Who would be the best person here to coach you through a crush situation—and why?",
+        "What's one thing that makes someone instantly memorable to you?",
+        "What's the most chaotic fictional couple you secretly support?",
+        "What's your most confident opinion about love that experience has not tested yet?",
+        "What's more intimidating: making the first move or keeping eye contact?",
+        "What's a pickup line so terrible it might actually work on you?",
+        "What's your most dramatic 'I am never doing that again' social moment?",
+        "What's the difference between someone being your type and someone being bad news?",
+        "What's a romantic gesture that is simple but genuinely elite?",
+        "What's your biggest 'I fumbled that' moment, only as detailed as you're comfy sharing?",
+        "What's one quality that can make you catch feelings faster than you expected?",
+        "What's the most unserious reason you've ever found someone charming?",
+        "If your love life had a warning label, what would it say?"
     ],
 }
 
 DARES = {
     "pg": [
-        "Send a 10-second voice note reading the ingredients on the nearest bottle or snack packaging like an epic movie battle speech.",
-        "Post the 7th photo in your camera roll into chat right now with zero explanation.",
-        "Send a voice note doing your most accurate animal impression (cow, dolphin, or goat) for 8 seconds.",
-        "Write a 4-line dramatic poetry stanza dedicated to your favorite food in chat right now.",
-        "Post your most frequently used emojis list into chat and let everyone judge your vibes.",
-        "Send a voice note attempting to beatbox for 10 seconds straight with zero hesitation.",
-        "Ping someone in this server and say: 'The ancient prophecy foretold your return.' and refuse to elaborate.",
-        "Send a selfie holding a random household object from your desk like an Olympic gold medal.",
-        "Send a voice note doing your most sinister, dramatic movie villain laugh.",
-        "Ask a completely serious, unhinged philosophical question in general chat (e.g. 'Are hot dogs tacos?').",
-        "Send a message typed using only your nose or elbow and see what comes out.",
-        "Rate the challenger's avatar and banner on a scale of 1 to 10 with honest critique.",
-        "Send a voice note reading Wikipedia's article on potatoes in a dramatic British nature documentary voice.",
-        "Post the funniest or dumbest meme currently saved on your device right now.",
-        "Declare yourself the main character of this server and state your dramatic superhero backstory in chat.",
-        "Send a voice note singing the chorus of your favorite childhood cartoon theme song.",
-        "Drop a screenshot of your current music queue on Spotify, YouTube, or Apple Music.",
-        "Challenge the challenger to an immediate game of Rock-Paper-Scissors right now in chat.",
-        "Send a message in chat giving a passionate 3-sentence motivational speech about drinking water.",
-        "Send a photo of an ordinary object nearby and describe it in chat as if it's an ultra-rare mythical RPG artifact.",
+        "Give a 20-second TED Talk defending why your favourite snack should be a national treasure.",
+        "Describe your current mood as a fake movie title and write its dramatic tagline.",
+        "Invent a superhero whose only power is mildly inconveniencing villains. Name them.",
+        "Type a weather report for the server's current vibe like you're a news anchor.",
+        "Explain how to make a sandwich as if you're teaching an alien who has never seen bread.",
+        "Write a four-line diss track aimed at your own procrastination.",
+        "Describe the nearest object like it's a legendary item with a 0.001% drop rate.",
+        "Send one sentence that sounds wise but means absolutely nothing.",
+        "Create patch notes for your personality: one buff, one nerf, and one bug.",
+        "Give yourself a ridiculous royal title and announce your first law.",
+        "Argue for three sentences that a hot dog is either a sandwich or a taco.",
+        "Write a dramatic obituary for a snack you just finished—or wish you had.",
+        "Speak or type like a sports commentator describing someone making a cup of tea.",
+        "Invent a new holiday and explain its weirdest tradition.",
+        "Give the group a completely unnecessary life lesson from a potato's perspective.",
+        "Make up a fake achievement unlocked for the last thing you did today.",
+        "Describe your favourite game badly enough that people have to guess it.",
+        "Write a one-star review of gravity as if you've just discovered it.",
+        "Create a slogan for the most useless product imaginable.",
+        "Give your next message the energy of a final anime villain speech.",
+        "Type a sentence without using the letter 'e'. If you fail, defend your failure dramatically.",
+        "Invent a ridiculous law for a fictional country where you are the ruler.",
+        "Describe your day using only three emojis, then let the chat interpret them.",
+        "Write a fake breaking-news headline about something completely ordinary.",
+        "Give the challenger a friendly, over-the-top award with a very specific title."
     ],
     "teen": [
-        "DM a friend in this server: 'We need to talk... it's about what happened yesterday.' and screenshot their confused response!",
-        "Post a screenshot of your phone's screen time for today (no cropping out your most used apps!).",
-        "Send a voice note confessing your undying love to a household object (toaster, chair, or pillow) with extreme passion.",
-        "DM your best friend: 'I have a confession to make... I think I'm Batman' and post the screenshot proof.",
-        "Send a voice note reading the lyrics of a hard rap song like an emotional Shakespearean sonnet.",
-        "DM someone active: 'You won't believe what they said about you...' and wait 60 seconds before saying 'they said you're awesome!'",
-        "Rate everyone currently active in this channel on a scale of 1 to 10 based purely on their aura.",
-        "Post a screenshot of your Discord mutual servers with the person who dared you.",
-        "Write a 4-line diss track about your favorite video game or anime in chat right now.",
-        "DM someone in this server: 'Are you free later? We need to calculate our astrological compatibility.' and screenshot the reply.",
-        "Send a message asking: 'If I were a vegetable, which one would I be?' and accept whatever chat says.",
-        "Send a voice note singing the chorus of a cheesy pop song at the top of your lungs.",
-        "Post the oldest saved meme in your camera roll into chat right now.",
-        "DM a random person in this server: 'You dropped your crown, king/queen 👑' and screenshot their reaction.",
-        "Send a message in chat confessing what you think your biggest red flag is in friendships.",
-        "Send a voice note attempting to speak in a fancy royal Victorian accent for 15 seconds.",
-        "Reveal your biggest musical guilty pleasure and send a link to the song in chat right now.",
-        "Send a screenshot of your YouTube recommended page right this second.",
-        "DM someone: 'Quick, act natural, they are watching us' and screenshot their confusion.",
-        "Type out a formal 3-sentence resignation speech stepping down as an active chatter in chat.",
+        "Write a formal apology to the server for your most recent imaginary crime against the vibes.",
+        "Do a 15-second villain monologue about someone stealing your fries. Voice note optional.",
+        "Pitch your favourite game or anime like you're trying to save a failing TV network.",
+        "Write a four-line rap about your biggest gaming L.",
+        "Give your current life situation a difficulty rating, boss name, and loot drop.",
+        "Create a fake dating-show intro for yourself without naming or tagging anyone.",
+        "Describe your typing style as a character class in an RPG, with stats and weaknesses.",
+        "Give a dramatic acceptance speech for an award nobody should ever receive.",
+        "Invent a fake rumour about yourself that is obviously ridiculous, then debunk it.",
+        "Make a top-three list of the most suspicious things a person can say in a group chat.",
+        "Write a patch note that would fix your most annoying habit.",
+        "Defend your most controversial game or anime opinion in exactly three sentences.",
+        "Turn the last message in the chat into a dramatic movie trailer tagline.",
+        "Type a breakup letter to an app, snack, or game you couldn't live without.",
+        "Give a 10-second motivational speech to someone about to lose a 1v1.",
+        "Describe your aura as a badly reviewed product: include a title and two reviews.",
+        "Create a new server role name for yourself and explain the completely unnecessary perks.",
+        "Write a two-line poem about your Wi-Fi connection during the worst possible moment.",
+        "Give the group a fake patch note for the human species.",
+        "Deliver your best PG pickup line to the chat—or write it like a poet with zero confidence.",
+        "Invent a conspiracy theory about why socks disappear in the laundry.",
+        "Write a confession from the point of view of your most-used emoji.",
+        "Describe how you'd survive a zombie apocalypse using only your actual strongest skill.",
+        "Create a tier list with three completely ordinary things, then defend the ranking.",
+        "Give yourself a boss-fight intro with a name, theme music, and one ridiculous weakness."
     ],
     "spicy": [
-        "DM the person you find most attractive or coolest in this server a genuine compliment, and screenshot the proof!",
-        "Post a screenshot of the last DM you sent to anyone (names can be blurred, but the message must be visible!).",
-        "Send a voice note whispering something utterly dramatic and romantic like a movie trailer voiceover.",
-        "Ping the person you think gives off the biggest 'heartbreaker' energy in this server and explain why.",
-        "DM someone: 'I had a dream about you last night' and wait for their reply before explaining a silly dream about cheese.",
-        "Post your top 3 most recently played songs on Spotify or YouTube without hiding anything.",
-        "Send a voice note delivering your best, smoothest flirty pickup line directly to the challenger.",
-        "Send a flirty or dramatic meme into chat and tag the person you think fits the meme best.",
-        "DM a friend: 'Be 100% honest, on a scale of 1-10, how good am I at flirting?' and screenshot the response.",
-        "Voice note a 10-second dramatic romantic movie line impression with maximum cinematic intensity.",
-        "Describe what your ideal romantic rainy day date looks like in 3 detailed sentences.",
-        "Send a message in chat asking: 'Who here would survive a week on a deserted island with me?'",
-        "Send a message declaring who in this server you think would make the best couple, and why.",
-        "Ping someone in this server and confess what your very first impression of them was when you first saw them.",
-        "Post a screenshot of your blocked list count or search history bar right now.",
+        "Deliver your smoothest PG pickup line to the challenger. Confidence matters more than quality.",
+        "Write a brutally honest but kind three-word first impression of your own vibe.",
+        "Give a dramatic 10-second confession to a snack as if it's the love of your life.",
+        "Pitch yourself as the lead in a rom-com in two sentences—make it hilariously overconfident.",
+        "Write the most charming compliment you can think of without using the words 'cute', 'hot', or 'beautiful'.",
+        "Give your flirting style a product name, slogan, and brutally honest customer review.",
+        "Act out or type a scene where you try to look cool and immediately fumble it.",
+        "Create a fictional dating profile headline for yourself that is weirdly accurate.",
+        "Write a message you'd send to impress your crush, but make it about a very boring object.",
+        "Give a 15-second dramatic speech about why you deserve a second chance after fumbling.",
+        "Write a green-flag / red-flag list for yourself with one entry in each column.",
+        "Deliver a cheesy pickup line in the style of a medieval knight, villain, or news reporter.",
+        "Describe your ideal date using only five emojis, then explain the choices.",
+        "Give the challenger a sincere compliment with main-character-level dramatic delivery.",
+        "Write a two-line confession from the perspective of someone who caught feelings for a Wi-Fi router.",
+        "Make a top-three list of qualities that make someone instantly unforgettable.",
+        "Act like you're on a dating show and introduce yourself in the most chaotic way possible.",
+        "Write a rejection to an imaginary admirer so polite it sounds like a corporate email.",
+        "Create a fake movie title about your romantic life and deliver the trailer tagline.",
+        "Give your best 'I totally meant to do that' speech after an imaginary social fumble.",
+        "Write the most dramatic response possible to receiving a simple 'hey'.",
+        "Describe your ideal partner's vibe using only a game class, an emoji, and a song genre.",
+        "Invent a flirting tutorial with three steps; at least one step must be terrible advice.",
+        "Make a respectful, playful roast of your own flirting skills in two sentences.",
+        "End your next message with a ridiculous signature title, like 'Supreme Minister of Rizz'."
     ],
 }
 
 FORFEIT_PUNISHMENTS = [
-    "🐔 **Chicken Out Penalty:** Send a 5-second voice note clucking like a confused rooster right now in chat!",
-    "🐔 **Chicken Out Penalty:** Type out a 3-sentence formal apology in chat explaining why you backed down from glory.",
-    "🐔 **Chicken Out Penalty:** Post a picture of chicken nuggets in chat and admit: 'These are my brothers and sisters.'",
-    "🐔 **Chicken Out Penalty:** Give the challenger 1,000 imaginary Aura points in chat with a formal certificate of defeat.",
-    "🐔 **Chicken Out Penalty:** Send a GIF of a fainting goat in chat and state: 'This is a live photo of my bravery.'",
-    "🐔 **Chicken Out Penalty:** Send a message in chat declaring the challenger as your supreme overlord for the day.",
-    "🐔 **Chicken Out Penalty:** You must react to the challenger's last 5 messages with 🐣 and 👑.",
-    "🐔 **Chicken Out Penalty:** Write a 4-line poem dedicated to the prompt you were too terrified to complete.",
-    "🐔 **Chicken Out Penalty:** Send a message in chat saying: 'I have brought dishonor upon my Discord ancestors.'",
-    "🐔 **Chicken Out Penalty:** Send a voice note doing a 5-second dramatic gasp of utter defeat.",
+    "🐔 **Certified Chicken:** Write a formal resignation letter from the game, citing 'an unexpected shortage of courage.'",
+    "🐔 **Certified Chicken:** Award the challenger 500 imaginary Aura and announce it like a championship result.",
+    "🐔 **Certified Chicken:** Give yourself a dramatic defeat title, such as 'The Fallen Legend of This Tuesday.'",
+    "🐔 **Certified Chicken:** Write a four-word apology to your own courage.",
+    "🐔 **Certified Chicken:** Send a one-line eulogy for the bravery that left your body.",
+    "🐔 **Certified Chicken:** Declare the prompt your sworn nemesis and give it a villain name.",
+    "🐔 **Certified Chicken:** Write a fake patch note: 'Courage reduced by 99%.' Add one more update.",
+    "🐔 **Certified Chicken:** Invent an excuse so dramatic it deserves its own documentary.",
+    "🐔 **Certified Chicken:** Give the chat a motivational speech about the importance of knowing your limits.",
+    "🐔 **Certified Chicken:** Accept the title 'Mayor of Almost Doing It' until the next round."
 ]
 
 
@@ -253,17 +260,17 @@ class TODView(NexoraView):
     def _build_prompt_picker(self):
         self.clear_container()
 
-        rating_badge = {"pg": "🟢 PG (Friendly)", "teen": "🟡 Teen (Party)", "spicy": "🔴 Spicy (Wild)"}.get(self.rating, "🟡 Teen")
+        rating_badge = {"pg": "🟢 WARM-UP", "teen": "🟡 CHAOS MODE", "spicy": "🔴 UNHINGED MODE"}.get(self.rating, "🟡 CHAOS MODE")
 
         if self.challenger.id == self.target.id:
             header = (
-                f"# 🎭 Truth or Dare · Solo Session\n"
+                f"# 🎭 NEXORA PARTY DECK · SOLO RUN\n"
                 f"> 👤 Playing: {self.target.mention} · Tier: **{rating_badge}**\n\n"
-                f"Choose Truth or Dare below to get your prompt:"
+                f"Pick your fate. The boring prompts have been banished."
             )
         else:
             header = (
-                f"# 🎭 Truth or Dare · PvP Duel!\n"
+                f"# 🎭 NEXORA PARTY DECK · DUEL MODE\n"
                 f"> ⚔️ **{self.challenger.display_name}** challenged **{self.target.display_name}**!\n"
                 f"> 👤 Target: {self.target.mention} · Tier: **{rating_badge}**\n\n"
                 f"Waiting for {self.target.mention} to make a choice..."
@@ -274,7 +281,7 @@ class TODView(NexoraView):
 
         btn_truth = discord.ui.Button(label="Truth", emoji="💬", style=discord.ButtonStyle.primary)
         btn_dare = discord.ui.Button(label="Dare", emoji="⚡", style=discord.ButtonStyle.danger)
-        btn_random = discord.ui.Button(label="Random Pick", emoji="🎲", style=discord.ButtonStyle.secondary)
+        btn_random = discord.ui.Button(label="Spin the Wheel", emoji="🎲", style=discord.ButtonStyle.secondary)
 
         btn_truth.callback = self._on_choose_truth
         btn_dare.callback = self._on_choose_dare
@@ -302,7 +309,7 @@ class TODView(NexoraView):
             header = (
                 f"# {emoji} {p_type} for @{self.target.name} (Solo)\n"
                 f"> 👤 Player: {self.target.mention} · Tier: **{r_label}**\n\n"
-                f"### 📋 The Task:\n"
+                f"### 📋 Your Challenge:\n"
                 f"> **\"{self.current_prompt}\"**"
             )
         else:
@@ -317,8 +324,8 @@ class TODView(NexoraView):
         self.add_separator(discord.SeparatorSpacing.small)
 
         # Primary Action Row: Complete, Forfeit, Reroll
-        btn_done = discord.ui.Button(label="I Did It! (Completed)", emoji="✅", style=discord.ButtonStyle.success)
-        btn_forfeit = discord.ui.Button(label="Chicken Out (Forfeit)", emoji="🐔", style=discord.ButtonStyle.danger)
+        btn_done = discord.ui.Button(label="Completed — EZ", emoji="✅", style=discord.ButtonStyle.success)
+        btn_forfeit = discord.ui.Button(label="I’m Cooked", emoji="🐔", style=discord.ButtonStyle.danger)
         btn_reroll = discord.ui.Button(
             label=f"Reroll ({2 - self.reroll_count})",
             emoji="🔄",
@@ -343,11 +350,11 @@ class TODView(NexoraView):
             btn_another = discord.ui.Button(label="Another Dare ⚡", style=discord.ButtonStyle.danger)
             btn_another.callback = lambda i: self._switch_to(i, "Dare")
 
-        btn_steal = discord.ui.Button(label="Steal Turn (I'll Do It!)", emoji="🙋", style=discord.ButtonStyle.secondary)
+        btn_steal = discord.ui.Button(label="Jump In!", emoji="🙋", style=discord.ButtonStyle.secondary)
         btn_steal.callback = self._on_steal_turn
 
         self.add_row(btn_another, btn_switch, btn_steal, DismissButton(user_id=self.challenger.id))
-        self.add_footer("Complete the prompt in chat/voice, then click 'I Did It!' or chicken out!")
+        self.add_footer("Make it legendary · Reroll if needed · Keep the chaos friendly.")
 
     async def _check_turn(self, interaction: discord.Interaction) -> bool:
         # If solo, author can click, or if challenge, target OR challenger can click
@@ -625,7 +632,7 @@ class TruthOrDare(commands.Cog):
     @commands.hybrid_command(
         name="tod",
         aliases=["truthordare"],
-        description="🎭 Interactive Truth or Dare party game with ratings and PvP/solo modes",
+        description="🎭 Chaos-packed Truth or Dare with wild prompts, duels, and rerolls",
     )
     @app_commands.describe(
         target="Member to challenge (leave empty to play yourself)",
@@ -633,9 +640,9 @@ class TruthOrDare(commands.Cog):
     )
     @app_commands.choices(
         rating=[
-            app_commands.Choice(name="🟢 PG (Family Friendly)", value="pg"),
-            app_commands.Choice(name="🟡 Teen (Party & Secrets)", value="teen"),
-            app_commands.Choice(name="🔴 Spicy (Wild Challenges)", value="spicy"),
+            app_commands.Choice(name="🟢 Warm-up (Funny & Friendly)", value="pg"),
+            app_commands.Choice(name="🟡 Chaos Mode (Party & Confessions)", value="teen"),
+            app_commands.Choice(name="🔴 Unhinged Mode (Bold & Flirty)", value="spicy"),
         ]
     )
     @commands.guild_only()
@@ -663,7 +670,7 @@ class TruthOrDare(commands.Cog):
         rating=[
             app_commands.Choice(name="🟢 PG (Family Friendly)", value="pg"),
             app_commands.Choice(name="🟡 Teen (Party & Secrets)", value="teen"),
-            app_commands.Choice(name="🔴 Spicy (Wild Secrets)", value="spicy"),
+            app_commands.Choice(name="🔴 Unhinged Mode (Bold Truths)", value="spicy"),
         ]
     )
     @commands.guild_only()
@@ -690,7 +697,7 @@ class TruthOrDare(commands.Cog):
     @app_commands.choices(
         rating=[
             app_commands.Choice(name="🟢 PG (Family Friendly)", value="pg"),
-            app_commands.Choice(name="🟡 Teen (Party Fun)", value="teen"),
+            app_commands.Choice(name="🟡 Chaos Mode (Party Fun)", value="teen"),
             app_commands.Choice(name="🔴 Spicy (Wild Challenges)", value="spicy"),
         ]
     )
