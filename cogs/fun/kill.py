@@ -13,19 +13,18 @@ class Kill(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.hybrid_command(
+    @commands.command(
         name="kill",
         description="Kill someone (playfully, probably)."
     )
-    @app_commands.describe(user="Who do you want to kill?")
-    async def kill(self, ctx: commands.Context, user: Optional[discord.Member] = None):
-        if user is None:
+    async def kill(self, ctx: commands.Context, *users: discord.Member):
+        if not users:
             await ctx.send("Tag someone to kill, you little gremlin.")
             return
 
         await send_owo_action_embed(
             ctx,
-            user,
+            list(users),
             "kill",  # data/owo_gifs/kill.json
             text_template="**{author}** eliminates **{target}** 💀",
             self_template="**{author}** attempts self-elimination but fails spectacularly. (╯°□°）╯︵ ┻━┻",

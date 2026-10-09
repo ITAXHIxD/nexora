@@ -237,6 +237,32 @@ COMMAND_DATA = {
         ],
         "related": ["editprofile", "editbirthday", "birthdaywish"],
     },
+    "poll": {
+        "name": "poll",
+        "aliases": ["quickpoll"],
+        "category": "utility",
+        "premium": False,
+        "admin": False,
+        "description": "Create an interactive poll with 2 to 6 options and live voting progress bars",
+        "usage": [
+            "n!poll <question> | <opt1> | <opt2> [| opt3...]",
+            "/poll <question> <option1> <option2> [option3] [option4] [option5] [option6] [duration]",
+        ],
+        "examples": [
+            "/poll question:Favorite Season? option1:Summer option2:Winter option3:Spring option4:Autumn",
+            "/poll question:Pizza or Burger? option1:Pizza option2:Burger duration:1h",
+            "n!poll Best Game? | Minecraft | Elden Ring | Valorant",
+            "n!quickpoll Do you like pineapple on pizza?",
+        ],
+        "notes": [
+            "Minimum **2 options required** (`option1` and `option2`), Maximum **6 options** supported",
+            "Real-time Unicode progress bars update on every community vote",
+            "Click an option button to vote or tap again to switch/retract your vote",
+            "Optional auto-close timer (e.g. `10m`, `1h`, `1d`)",
+            "Poll creator or staff can click 🛑 **End Poll** to finalize and declare the winner",
+        ],
+        "related": ["remind", "wyr", "tod"],
+    },
     "birthdaywish": {
         "name": "birthdaywish",
         "aliases": [],
@@ -746,6 +772,131 @@ COMMAND_DATA = {
         ],
         "related": ["vibe", "tod"],
     },
+    "tictactoe": {
+        "name": "tictactoe",
+        "aliases": ["ttt"],
+        "category": "fun",
+        "premium": False,
+        "admin": False,
+        "description": "Play Tic-Tac-Toe solo against smart AI or challenge a friend to a duel",
+        "usage": [
+            "n!tictactoe [opponent] [difficulty]",
+            "/tictactoe [opponent] [difficulty]",
+        ],
+        "examples": [
+            "n!tictactoe",
+            "n!tictactoe @Alex",
+            "/tictactoe difficulty:hard",
+            "/tictactoe opponent:@Alex",
+        ],
+        "notes": [
+            "Leave opponent blank or pick yourself/bot for automatic Solo Play vs Nexora AI",
+            "Difficulties for solo play: `easy`, `medium`, `hard` (unbeatable minimax)",
+            "Multiplayer mode: Challenge a friend to a 2-player duel with real-time turns",
+            "Green tile highlighting on winning lines",
+            "Persistent session scoreboards and instant 🔄 Rematch button",
+            "All games automatically saved to MongoDB /gamestats",
+        ],
+        "related": ["connect4", "rps", "guess", "gamestats"],
+    },
+    "connect4": {
+        "name": "connect4",
+        "aliases": ["c4", "fourinrow"],
+        "category": "fun",
+        "premium": False,
+        "admin": False,
+        "description": "Play Connect 4 solo against Nexora AI or challenge a friend to a duel",
+        "usage": [
+            "n!connect4 [opponent] [difficulty]",
+            "/connect4 [opponent] [difficulty]",
+        ],
+        "examples": [
+            "n!connect4",
+            "n!connect4 @Alex",
+            "/connect4 difficulty:hard",
+            "/connect4 opponent:@Alex",
+        ],
+        "notes": [
+            "Leave opponent blank or pick yourself/bot for automatic Solo Play vs Nexora AI",
+            "7 columns x 6 rows board with realistic gravity dropping",
+            "Winning 4-in-a-row chips are highlighted with 🌟 star badges",
+            "Difficulties: `easy`, `medium`, `hard` (tactical threat blocking & center control)",
+            "Score tracking across repeat matches with 🔄 Play Again button",
+            "Records stats and win rates to MongoDB /gamestats",
+        ],
+        "related": ["tictactoe", "rps", "guess", "gamestats"],
+    },
+    "rps": {
+        "name": "rps",
+        "aliases": [],
+        "category": "fun",
+        "premium": False,
+        "admin": False,
+        "description": "Play Rock-Paper-Scissors solo vs Nexora or challenge a friend to a hidden-choice duel",
+        "usage": [
+            "n!rps [opponent]",
+            "/rps [opponent]",
+        ],
+        "examples": [
+            "n!rps",
+            "n!rps @Alex",
+            "/rps opponent:@Alex",
+        ],
+        "notes": [
+            "Solo mode: Fast-paced battle vs Nexora with consecutive win streaks 🔥 and milestone celebrations",
+            "Multiplayer mode: Hidden secret moves via ephemeral buttons until both players choose",
+            "Persistent session score tracking with 🔄 Rematch button",
+            "Integrated with /gamestats leaderboard",
+        ],
+        "related": ["tictactoe", "connect4", "guess", "gamestats"],
+    },
+    "guess": {
+        "name": "guess",
+        "aliases": [],
+        "category": "fun",
+        "premium": False,
+        "admin": False,
+        "description": "Guess the secret number (1-100) solo against Nexora or duel a friend",
+        "usage": [
+            "n!guess [opponent]",
+            "/guess [opponent]",
+        ],
+        "examples": [
+            "n!guess",
+            "n!guess @Alex",
+            "/guess opponent:@Alex",
+        ],
+        "notes": [
+            "Solo mode: Deduce the number within 6 attempts with hot/cold hints and narrowing bounds",
+            "Multiplayer mode: Turn-based deduction race against a friend",
+            "Input numbers easily using Discord pop-up modals",
+            "Persistent records saved to /gamestats",
+        ],
+        "related": ["tictactoe", "connect4", "rps", "gamestats"],
+    },
+    "gamestats": {
+        "name": "gamestats",
+        "aliases": ["game_stats", "leaderboard_games"],
+        "category": "fun",
+        "premium": False,
+        "admin": False,
+        "description": "View your mini-game statistics, win rates, and competitive rank",
+        "usage": [
+            "n!gamestats [member]",
+            "/gamestats [member]",
+        ],
+        "examples": [
+            "n!gamestats",
+            "n!gamestats @Alex",
+            "/gamestats member:@Alex",
+        ],
+        "notes": [
+            "Tracks Tic-Tac-Toe, Connect 4, Rock-Paper-Scissors, and Number Guesser",
+            "Displays visual Unicode win-rate progress bars and competitive ranks (Rookie to Grandmaster)",
+            "Backed by MongoDB Atlas cloud persistence",
+        ],
+        "related": ["tictactoe", "connect4", "rps", "guess"],
+    },
     # ── MODERATION ────────────────────────────────────────────────────────────
     "ban": {
         "name": "ban",
@@ -1183,15 +1334,15 @@ COMMAND_DATA = {
         "category": "premium",
         "premium": False,
         "admin": False,
-        "description": "Check this server's premium status and expiry",
-        "usage": ["n!premium", "/premium"],
-        "examples": ["n!premium", "/premium"],
+        "description": "View Server Premium status or personal User VIP dashboard",
+        "usage": ["n!premium [server|user]", "/premium [server|user]"],
+        "examples": ["n!premium", "n!premium server", "/premium user"],
         "notes": [
-            "Shows tier, expiry date, vanity slot count, and who purchased it",
-            "Works in any server — shows FREE if not subscribed",
-            "Use `n!premium_price` to see upgrade options",
+            "Shows tier plan, expiry countdown, slots, and diagnostics",
+            "Switch between Server Premium overview and Personal User VIP dashboard",
+            "Use `n!premium_price` to view upgrade plans and save 20% on annual billing",
         ],
-        "related": ["premium_price", "vanity"],
+        "related": ["premium_price", "vanity", "vip", "booster_role"],
     },
     "premium_price": {
         "name": "premium_price",
@@ -1199,15 +1350,16 @@ COMMAND_DATA = {
         "category": "premium",
         "premium": False,
         "admin": False,
-        "description": "Show Nexora premium plans and pricing",
+        "description": "Show Server Premium & User VIP plans with live discount calculator",
         "usage": ["n!premium_price", "/premium_price"],
         "examples": ["n!premium_price", "/plans"],
         "notes": [
-            "Plans: **BASIC** $4.99/mo · **PRO** $12.99/mo · **ENTERPRISE** $29.99/mo · **CUSTOM** negotiated",
-            "Contact the bot owner to subscribe",
-            "Yearly pricing available for savings",
+            "Server Plans: **BASIC** $4.99/mo · **PRO** $12.99/mo · **ENTERPRISE** $29.99/mo",
+            "User VIP Plans: **VIP** $2.99/mo · **VIP PLUS** $7.99/mo (Includes Server Pass)",
+            "Interactive toggle switches between Monthly and Annual (Save 20%) billing",
+            "Instant activation via UPI / PayPal",
         ],
-        "related": ["premium", "vanity"],
+        "related": ["premium", "vanity", "vip"],
     },
     "vanity": {
         "name": "vanity",
@@ -1215,16 +1367,183 @@ COMMAND_DATA = {
         "category": "premium",
         "premium": True,
         "admin": False,
-        "description": "View this server's vanity role configuration",
+        "description": "Manage automated vanity status roles and supporter leaderboard",
         "usage": ["n!vanity", "/vanity"],
-        "examples": ["n!vanity"],
+        "examples": ["n!vanity", "/vanity"],
         "notes": [
-            "👑 **Premium only** — requires BASIC tier or above",
-            "Shows configured keyword → role mappings and slots used",
-            "BASIC: 5 slots · PRO: 20 slots · ENTERPRISE/CUSTOM: Unlimited",
-            "Vanity roles are auto-assigned when a member's status contains the keyword",
+            "👑 **Server Premium only** — requires Basic tier or above",
+            "Members with your server link/tag in their status unlock custom roles automatically",
+            "Includes live supporter leaderboard and celebratory log announcements",
+            "Use `/vanity_sync` to perform an immediate server-wide audit sweep",
         ],
-        "related": ["premium", "premium_price"],
+        "related": ["vanity_sync", "premium", "premium_price"],
+    },
+    "vanity_sync": {
+        "name": "vanity_sync",
+        "aliases": [],
+        "category": "premium",
+        "premium": True,
+        "admin": True,
+        "description": "Run an instant live sweep to award or revoke vanity status roles",
+        "usage": ["n!vanity_sync", "/vanity_sync"],
+        "examples": ["n!vanity_sync", "/vanity_sync"],
+        "notes": [
+            "👑 **Server Premium only**",
+            "Scans all active presences and syncs vanity roles immediately",
+            "Outputs execution duration, members scanned, and roles awarded/revoked",
+            "Requires **Manage Roles** permission",
+        ],
+        "related": ["vanity", "premium"],
+    },
+    "vip": {
+        "name": "vip",
+        "aliases": [],
+        "category": "premium",
+        "premium": True,
+        "admin": False,
+        "description": "Manage personal cross-server VIP perks, custom colors, and badges",
+        "usage": ["n!vip [color|badge|pass]", "/vip [color|badge|pass]"],
+        "examples": ["n!vip", "/vip color #00D2FF", "/vip badge crown", "/vip pass 1072508777623990362"],
+        "notes": [
+            "⭐ **User VIP only** — perks follow you across every server!",
+            "Customize the bot's embed accent color on all your commands",
+            "Equip exclusive VIP badges on your profile and avatar cards",
+            "VIP Plus subscribers can redeem Server Passes to grant Server Premium to any guild",
+        ],
+        "related": ["premium", "premium_price", "avatar"],
+    },
+    "booster_role": {
+        "name": "booster_role",
+        "aliases": [],
+        "category": "premium",
+        "premium": True,
+        "admin": False,
+        "description": "Create and customize your personal private booster role",
+        "usage": ["n!booster_role [create|color|name|icon|delete]", "/booster_role [create|color|name|icon|delete]"],
+        "examples": ["/booster_role create name:Valkyrie color:#FF1493", "/booster_role color #00D2FF", "/booster_role delete"],
+        "notes": [
+            "👑 **Server Premium only** — requires active Nitro Booster status in server",
+            "Create your private role and customize color (hex or presets) and name",
+            "Role is automatically positioned below the configured anchor role",
+            "Auto-cleans if booster leaves or unboosts",
+        ],
+        "related": ["premium", "vanity"],
+    },
+    "custom_reply": {
+        "name": "custom_reply",
+        "aliases": ["autoreply"],
+        "category": "premium",
+        "premium": True,
+        "admin": True,
+        "description": "Smart automated keyword responders with dynamic variables",
+        "usage": ["n!custom_reply [add|delete|list|test]", "/custom_reply [add|delete|list|test]"],
+        "examples": ["/custom_reply add trigger:.store reply:Check out our shop at https://example.com!", "/custom_reply list"],
+        "notes": [
+            "👑 **Server Premium only** — Basic: 10, Pro: 30, Enterprise: Unlimited",
+            "Supports `{user}`, `{user.mention}`, `{server}`, `{channel}`, and `{members}` variables",
+            "Built-in per-user anti-spam cooldown protection",
+            "Requires **Manage Server** permission to configure",
+        ],
+        "related": ["premium", "embed_studio"],
+    },
+    "embed_studio": {
+        "name": "embed_studio",
+        "aliases": ["embed_builder"],
+        "category": "premium",
+        "premium": True,
+        "admin": True,
+        "description": "Enterprise modal-driven embed builder and announcement composer",
+        "usage": ["n!embed_studio", "/embed_studio"],
+        "examples": ["/embed_studio", "n!embed_builder"],
+        "notes": [
+            "👑 **Server Premium only**",
+            "Interactive Discord Modal to configure title, description, color, banners, and footers",
+            "Live interactive preview before dispatching to any channel",
+            "Requires **Manage Messages** permission",
+        ],
+        "related": ["custom_reply", "premium"],
+    },
+    "server_growth": {
+        "name": "server_growth",
+        "aliases": ["growth", "growth_analytics"],
+        "category": "premium",
+        "premium": True,
+        "admin": False,
+        "description": "Audit vanity supporter penetration, booster velocity, and community health",
+        "usage": ["n!server_growth", "/server_growth"],
+        "examples": ["/server_growth", "n!growth"],
+        "notes": [
+            "👑 **Server Premium only**",
+            "Calculates the exact percentage and count of members promoting your vanity status",
+            "Visual ASCII progress meters for activity, human ratios, and boost performance",
+            "Community Engagement Index rating out of 100",
+        ],
+        "related": ["vanity", "premium"],
+    },
+    "tictactoe": {
+        "name": "tictactoe",
+        "aliases": ["ttt"],
+        "category": "games",
+        "premium": False,
+        "admin": False,
+        "description": "Play Tic-Tac-Toe solo vs smart AI or challenge a friend to a PvP duel",
+        "usage": ["n!tictactoe [opponent]", "/tictactoe [opponent] [difficulty]"],
+        "examples": ["/tictactoe", "/tictactoe opponent:@Alex", "/tictactoe difficulty:hard"],
+        "notes": [
+            "Leave `opponent` blank to play Solo vs Nexora AI with automatic moves!",
+            "Choose difficulty: `easy` (casual), `medium` (balanced), or `hard` (minimax)",
+            "Highlights winning line in green and includes instant Play Again rematch button",
+            "Saves wins, losses, and win rates to your profile `/gamestats`",
+        ],
+        "related": ["rps", "guess", "gamestats"],
+    },
+    "rps": {
+        "name": "rps",
+        "aliases": [],
+        "category": "games",
+        "premium": False,
+        "admin": False,
+        "description": "Play Rock-Paper-Scissors solo against bot or duel a friend",
+        "usage": ["n!rps [opponent]", "/rps [opponent]"],
+        "examples": ["/rps", "/rps opponent:@Alex"],
+        "notes": [
+            "Solo mode features live win-streak tracking and witty commentary",
+            "Duel mode features secret locked-in choices and instant rematch button",
+            "Saves win streaks and stats to `/gamestats`",
+        ],
+        "related": ["tictactoe", "guess", "gamestats"],
+    },
+    "guess": {
+        "name": "guess",
+        "aliases": [],
+        "category": "games",
+        "premium": False,
+        "admin": False,
+        "description": "Guess the secret number (1-100) solo against bot or duel a friend",
+        "usage": ["n!guess [opponent]", "/guess [opponent]"],
+        "examples": ["/guess", "/guess opponent:@Alex"],
+        "notes": [
+            "Solo: Guess in 6 attempts with hot/cold and higher/lower visual bounds",
+            "Duel: Turn-based race against your opponent to deduce the number first",
+            "Saves stats to `/gamestats`",
+        ],
+        "related": ["tictactoe", "rps", "gamestats"],
+    },
+    "gamestats": {
+        "name": "gamestats",
+        "aliases": ["game_stats", "leaderboard_games"],
+        "category": "games",
+        "premium": False,
+        "admin": False,
+        "description": "View player mini-game win rates, records, and ranking medals",
+        "usage": ["n!gamestats [member]", "/gamestats [member]"],
+        "examples": ["/gamestats", "/gamestats member:@Alex"],
+        "notes": [
+            "Shows records for Tic-Tac-Toe, Rock-Paper-Scissors, and Number Guesser",
+            "Includes win rate progress bars and performance ranks (Grandmaster, Veteran, etc.)",
+            "Backed by persistent MongoDB Atlas storage",
+        ],
+        "related": ["tictactoe", "rps", "guess"],
     },
 }
 
@@ -1383,33 +1702,44 @@ class HelpMainView(HelpLayoutView):
     def _build(self):
         self._reset()
         registry = getattr(self.bot, "_help_registry", COMMAND_DATA)
+        canonical_cmds = [d for name, d in registry.items() if name == d.get("name")]
         counts = {}
-        for d in registry.values():
-            counts[d["category"]] = counts.get(d["category"], 0) + 1
+        for d in canonical_cmds:
+            cat_name = d.get("category", "utility")
+            counts[cat_name] = counts.get(cat_name, 0) + 1
 
-        lines = [
-            "# 🌌 Nexora Help Center",
-            "",
-            f"**Prefix:** `{prefix(self.bot)}` or `{prefix(self.bot).swapcase()}`  ·  **Slash:** `/`",
-            "",
-            "Browse every command, search by keyword, or open a command directly.",
-            "",
-            "**Quick start**",
-            f"`{prefix(self.bot)}help <command>`  ·  `/help <command>`",
-            "",
-            f"📚 **{len(registry)}** commands indexed",
-            "",
-            "🎂 **Birthday System** — reads configured introductions, stores server-specific profiles, posts scheduled announcements, and supports optional birthday roles. Personal setup and privacy controls are free; premium adds cross-server reach.",
-        ]
+        p = prefix(self.bot)
+        total_unique = len(canonical_cmds)
 
-        visible_categories = [k for k,v in CATEGORIES.items() if counts.get(k)]
+        header = (
+            "# 🌌 Nexora Help Center\n"
+            "> High-performance multi-purpose Discord bot with MongoDB persistence & Components V2 UI.\n\n"
+            f"**Prefix:** `{p}` or `{p.swapcase()}`  ·  **Slash:** `/`  ·  📚 **{total_unique}** unique commands\n"
+            f"**Quick Jump:** `{p}help <command>` or `/help <command>`"
+        )
+        self.add_text(header)
+        self.add_separator()
+
+        whats_new = (
+            "## ✨ What's New & Highlights\n"
+            "• 👑 **MongoDB Atlas Cloud Sync:** Cross-server real-time persistence for premium, warnings, reminders, and confessions.\n"
+            "• 🎭 **Vanity Roles Engine:** Automatic role grants synced to custom status keyword triggers with slot tiers (`/vanity`, `n!vanity_add`).\n"
+            "• 🎂 **Birthday Announcements & Intros:** Automated birthday alerts, member profiles, age calculation, and celebration roles (`/setbirthday`, `/birthday`).\n"
+            "• 🛡️ **Advanced Moderation & Logs:** Bans, kicks, mutes, tempbans, warnings, lockdowns, snipes, and auto-detecting audit log channels (`/ban`, `/mute`, `/serverlogs`).\n"
+            "• 🎲 **Social Games & Duels:** 3x3 Tic-Tac-Toe, Rock-Paper-Scissors, Ship love compatibility, Truth or Dare, and Would You Rather.\n"
+            "• 🧸 **13 Animated Action Commands:** Prefix-only expressions with anime reaction gifs (`n!pat`, `n!cuddle`, `n!hug`, `n!kiss`, `n!slap`, `n!punch`, etc.).\n"
+            "• ⚡ **Optimized Command Engine:** Strict adherence to Discord's 100 global slash command ceiling with seamless hybrid fallback."
+        )
+        self.add_text(whats_new)
+        self.add_separator()
+
+        visible_categories = [k for k, v in CATEGORIES.items() if counts.get(k)]
         if visible_categories:
-            lines += ["", "**Categories**"]
+            cat_lines = ["## 📂 Browse Categories"]
             for key in visible_categories:
                 cat = CATEGORIES[key]
-                lines.append(f"{cat['emoji']} **{cat['label']}** — `{counts[key]}` commands · {cat['desc']}")
-
-        self.add_text("\n".join(lines))
+                cat_lines.append(f"{cat['emoji']} **{cat['label']}** — `{counts[key]}` commands · {cat['desc']}")
+            self.add_text("\n".join(cat_lines))
 
         select = discord.ui.Select(
             placeholder="📂 Browse a category...",
@@ -1685,36 +2015,39 @@ def _send_help_view(ctx, view):
 
 # ── Category guesser for auto-stubs ───────────────────────────────────────────
 
-def _guess_category(cmd: commands.Command) -> str:
+def _guess_category(cmd) -> str:
     """Guess category from cog name / module path."""
     cog = getattr(cmd, "cog", None) or getattr(cmd, "binding", None)
     if cog:
         cog_name = type(cog).__name__.lower()
         module   = (getattr(cog, "__module__", "") or "").lower()
-        for key in ("moderation", "mod", "admin"):
-            if key in cog_name or key in module: return "moderation"
-        for key in ("fun", "game", "ship", "react"):
-            if key in cog_name or key in module: return "fun"
-        for key in ("info", "stat", "user", "server"):
-            if key in cog_name or key in module: return "info"
-        for key in ("analytic", "export", "log"):
-            if key in cog_name or key in module: return "analytics"
-        for key in ("system", "thread", "guide"):
-            if key in cog_name or key in module: return "system"
-        for key in ("premium", "boost"):
-            if key in cog_name or key in module: return "premium"
-        for key in ("owner", "dev"):
-            if key in cog_name or key in module: return "owner"
+        if any(k in cog_name or k in module for k in ("owner", "dev")):
+            return "owner"
+        if any(k in cog_name or k in module for k in ("premium", "boost", "vanity")):
+            return "premium"
+        if any(k in cog_name or k in module for k in ("moderation", "mod", "admin", "ban", "kick", "mute", "warn", "lockdown", "snipe", "purge", "voicemove")):
+            return "moderation"
+        if any(k in cog_name or k in module for k in ("game", "rps", "tictactoe", "say")):
+            return "games"
+        if any(k in cog_name or k in module for k in ("analytic", "export", "server_logs")):
+            return "analytics"
+        if any(k in cog_name or k in module for k in ("system", "thread", "guide")):
+            return "system"
+        if any(k in cog_name or k in module for k in ("info", "stat", "user", "server", "avatar", "invite", "channel", "role", "botinfo")):
+            return "info"
+        if any(k in cog_name or k in module for k in ("fun", "ship", "react", "confess", "meme", "tod", "wyr", "party", "pat", "hug", "kiss", "slap", "punch", "bite", "bonk", "boop", "cuddle", "kill", "poke", "kicks", "blush")):
+            return "fun"
+        if any(k in cog_name or k in module for k in ("utility", "util", "afk", "birthday", "poll", "calc", "remind", "spotify", "steal")):
+            return "utility"
     return "utility"
 
 
-def _make_stub(cmd: commands.Command) -> dict:
+def _make_stub(cmd) -> dict:
     """Build useful live documentation for a command without a hand-written entry."""
     p = "n!"
     name = cmd.name
     aliases = list(getattr(cmd, "aliases", []) or [])
     desc = getattr(cmd, "description", None) or getattr(cmd, "help", None) or "No description provided."
-    # Trim discord's verbose help strings
     if len(desc) > 80:
         desc = desc[:77] + "…"
     signature = (getattr(cmd, "signature", "") or "").strip()
@@ -1730,6 +2063,21 @@ def _make_stub(cmd: commands.Command) -> dict:
     parameter_note = (
         f"Parameters: `{signature}`" if signature else "No parameters required."
     )
+
+    is_hybrid = isinstance(cmd, commands.HybridCommand)
+    is_slash = isinstance(cmd, app_commands.Command) or is_hybrid or hasattr(cmd, "app_command")
+    is_prefix = isinstance(cmd, commands.Command)
+
+    usage_list = []
+    if is_prefix:
+        usage_list.append(f"n!{name}{suffix}")
+    if is_slash:
+        usage_list.append(f"/{name}{suffix}")
+    if not usage_list:
+        usage_list = [f"n!{name}{suffix}", f"/{name}{suffix}"]
+
+    examples_list = [usage_list[-1] if usage_list else f"n!{name}"]
+
     return {
         "name":        name,
         "aliases":     aliases,
@@ -1737,12 +2085,12 @@ def _make_stub(cmd: commands.Command) -> dict:
         "premium":     False,
         "admin":       False,
         "description": desc,
-        "usage":       [f"n!{name}{suffix}", f"N!{name}{suffix}", f"/{name}{suffix}"],
-        "examples":    [f"/{name}{suffix}"],
+        "usage":       usage_list,
+        "examples":    examples_list,
         "notes":       [
             parameter_note,
-            "Prefix commands accept either `n!` or `N!`.",
-            "This reference is generated from the live command registration.",
+            "Prefix: `n!` · Slash: `/`",
+            "This reference is generated dynamically from live command registrations.",
         ],
         "related":     [],
         "_auto_stub":  True,
@@ -1754,46 +2102,45 @@ class Help(commands.Cog):
         self.bot = bot
 
     async def cog_load(self):
-        """
-        Merge COMMAND_DATA with all currently loaded bot commands.
-        Commands already documented in COMMAND_DATA keep their full docs.
-        Undocumented commands get an auto-generated stub so they show up
-        in search and category lists immediately.
-        """
+        """Initial sync on load."""
         self._sync_registry()
-        logger.info("Help registry synced: %d commands", len(self.bot._help_registry))
+        logger.info("Help registry initialized: %d commands", len(self.bot._help_registry))
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """Full re-sync once all cogs have completed loading."""
+        self._sync_registry()
+        logger.info("Help registry refreshed on_ready: %d total commands indexed", len(self.bot._help_registry))
 
     def _sync_registry(self):
-        registry = dict(COMMAND_DATA)  # start from static docs
+        """Index all commands across bot.commands and bot.tree."""
+        registry = dict(COMMAND_DATA)
 
-        skip = {"help", "h", "cmds", "commands"}  # don't stub the help command itself
+        skip = {"help", "h", "cmds", "commands"}
 
         for cmd in self.bot.commands:
             name = cmd.name
-            if name in skip or name in registry:
+            if name in skip:
                 continue
-            registry[name] = _make_stub(cmd)
-            # also index aliases so searches hit them
+            if name not in registry:
+                registry[name] = _make_stub(cmd)
             for alias in (cmd.aliases or []):
                 if alias not in registry:
                     stub = _make_stub(cmd)
                     stub["name"] = alias
-                    # don't double-list in the UI — point back to canonical
                     stub["related"] = [name]
                     registry[alias] = stub
 
-        # Pure slash commands do not appear in bot.commands. Add them too so
-        # `/help` documents every command users can actually invoke.
         for cmd in self.bot.tree.walk_commands():
             name = cmd.name
-            if name in skip or name in registry:
+            if name in skip:
                 continue
-            registry[name] = _make_stub(cmd)
+            if name not in registry:
+                registry[name] = _make_stub(cmd)
 
         self.bot._help_registry = registry
 
     async def cog_unload(self):
-        # Clean up so it doesn't linger with stale data
         if hasattr(self.bot, "_help_registry"):
             del self.bot._help_registry
 
@@ -1814,7 +2161,10 @@ class Help(commands.Cog):
           /help afk
           n!help birthday
         """
+        # Always dynamically sync so newly loaded cogs are 100% visible
+        self._sync_registry()
         registry = getattr(self.bot, "_help_registry", COMMAND_DATA)
+
         if command:
             query = command.lower().strip()
             data = registry.get(query)

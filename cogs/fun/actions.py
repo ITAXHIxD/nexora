@@ -9,7 +9,7 @@ cuddle, bonk, bite, poke, blush, kick, kill, pat, punch, and boop.
 
 import discord
 from discord.ext import commands
-from typing import Optional, List
+from typing import Optional, List, Union
 import random
 import json
 import os
@@ -116,13 +116,12 @@ def load_gif_list(action_key: str) -> List[str]:
 
 
 class ActionLayoutView(NexoraView):
-    """Components V2 LayoutView for dynamic OwO action cards."""
+    """Components V2 Action Card View with optional GIF media gallery."""
 
     def __init__(
         self,
-        *,
         author: discord.Member,
-        target: discord.Member,
+        target: Union[discord.Member, List[discord.Member]],
         action_key: str,
         emoji: str,
         label: str,
@@ -133,7 +132,8 @@ class ActionLayoutView(NexoraView):
     ):
         super().__init__(user_id=author.id, color=color, timeout=timeout)
         self.author = author
-        self.target = target
+        self.targets = target if isinstance(target, list) else [target]
+        self.target = self.targets[0]
         self.action_key = action_key
         self.emoji = emoji
         self.label = label
@@ -145,10 +145,11 @@ class ActionLayoutView(NexoraView):
         self.clear_container()
 
         # Header Section with author avatar
-        if self.author.id != self.target.id:
-            sub = f"> {self.author.mention} ➔ {self.target.mention}"
-        else:
+        if len(self.targets) == 1 and self.author.id == self.targets[0].id:
             sub = f"> {self.author.mention} *(self-interaction)*"
+        else:
+            mentions_str = ", ".join(t.mention for t in self.targets)
+            sub = f"> {self.author.mention} ➔ {mentions_str}"
 
         header_text = f"# {self.emoji} {self.label}\n{sub}"
         thumb_url = str(self.author.display_avatar.url)
@@ -174,7 +175,7 @@ class ActionLayoutView(NexoraView):
 
         # Action Buttons
         row = discord.ui.ActionRow()
-        if self.author.id != self.target.id:
+        if any(t.id != self.author.id for t in self.targets):
             return_btn = discord.ui.Button(
                 label=f"{self.label} Back!",
                 emoji=self.emoji,
@@ -187,9 +188,11 @@ class ActionLayoutView(NexoraView):
         self.container.add_item(row)
 
     async def _on_return_action(self, interaction: discord.Interaction):
-        if interaction.user.id != self.target.id:
+        target_ids = [t.id for t in self.targets]
+        if interaction.user.id not in target_ids:
+            names = ", ".join(t.display_name for t in self.targets)
             await interaction.response.send_message(
-                f"❌ Only {self.target.display_name} can return this {self.label.lower()}!",
+                f"❌ Only {names} can return this {self.label.lower()}!",
                 ephemeral=True,
             )
             return
@@ -200,7 +203,7 @@ class ActionLayoutView(NexoraView):
                 for child in item.children:
                     if isinstance(child, discord.ui.Button) and child.label == f"{self.label} Back!":
                         child.disabled = True
-                        child.label = f"Returned by {self.target.display_name} 💕"
+                        child.label = f"Returned by {interaction.user.display_name} 💕"
 
         await interaction.response.edit_message(view=self)
 
@@ -209,12 +212,12 @@ class ActionLayoutView(NexoraView):
         new_gif = random.choice(gifs) if gifs else None
 
         return_view = ActionLayoutView(
-            author=self.target,
+            author=interaction.user,
             target=self.author,
             action_key=self.action_key,
             emoji=self.emoji,
             label=f"{self.label} Back",
-            desc=f"**{self.target.display_name}** warmly returned the {self.label.lower()} to **{self.author.display_name}**! 💞",
+            desc=f"**{interaction.user.display_name}** warmly returned the {self.label.lower()} to **{self.author.display_name}**! 💞",
             gif_url=new_gif,
             color=self._color,
         )
@@ -223,7 +226,7 @@ class ActionLayoutView(NexoraView):
 
 async def send_owo_action_embed(
     ctx: commands.Context,
-    target: discord.Member,
+    target: Union[discord.Member, List[discord.Member]],
     action_key: str,
     *,
     text_template: str,
@@ -234,8 +237,7 @@ async def send_owo_action_embed(
     action_label: Optional[str] = None,
 ):
     """
-    Modern Components V2 Action card dispatcher.
-    Upgrades all 13 fun action commands from legacy discord.Embed to Components V2.
+    Modern Components V2 Action card dispatcher supporting single or multi-user targets.
     """
     author: discord.Member = ctx.author
 
@@ -251,7 +253,20 @@ async def send_owo_action_embed(
     else:
         color_val = BRAND_COLOR
 
-    if target.id == author.id:
+    if isinstance(target, (list, tuple)):
+        targets_list = list(target)
+    elif target:
+        targets_list = [target]
+    else:
+        targets_list = [author]
+
+    if len(targets_list) > 1:
+        names = ", ".join(f"**{m.display_name}**" for m in targets_list[:-1]) + f" and **{targets_list[-1].display_name}**"
+        desc = text_template.format(
+            author=author.display_name,
+            target=names,
+        )
+    elif targets_list[0].id == author.id:
         if self_template:
             desc = self_template.format(author=author.display_name)
         else:
@@ -262,7 +277,7 @@ async def send_owo_action_embed(
     else:
         desc = text_template.format(
             author=author.display_name,
-            target=target.display_name,
+            target=targets_list[0].display_name,
         )
 
     if extra_note:
@@ -273,7 +288,7 @@ async def send_owo_action_embed(
 
     view = ActionLayoutView(
         author=author,
-        target=target,
+        target=targets_list,
         action_key=action_key,
         emoji=emoji,
         label=label,

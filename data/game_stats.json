@@ -1,0 +1,28 @@
+{
+  "99999": {
+    "rps": {
+      "played": 0,
+      "wins": 0,
+      "losses": 0,
+      "draws": 0
+    },
+    "tictactoe": {
+      "played": 0,
+      "wins": 0,
+      "losses": 0,
+      "draws": 0
+    },
+    "connect4": {
+      "played": 0,
+      "wins": 0,
+      "losses": 0,
+      "draws": 0
+    },
+    "guess": {
+      "played": 0,
+      "wins": 0,
+      "losses": 0,
+      "draws": 0
+    }
+  }
+}

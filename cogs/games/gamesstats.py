@@ -1,305 +1,269 @@
-import discord
-import sqlite3
-import json
+"""
+cogs/games/gamesstats.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Interactive Components V2 Game Statistics Hub for Nexora.
+
+Permanent game statistics tracking wins, losses, win rates,
+and activity across mini-games (Tic-Tac-Toe, Rock-Paper-Scissors, Guess, Connect 4).
+Supports dual MongoDB and local persistence, plus Admin Reset and Customization.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+
 import logging
-from discord.ext import commands
+from datetime import datetime, timezone
+from typing import Optional, Literal
+
+import discord
 from discord import app_commands
+from discord.ext import commands
+
+from utils.game_stats import (
+    get_user_stats,
+    reset_user_stats,
+    reset_server_stats,
+    set_user_stats,
+)
+from utils.ui import (
+    BRAND_COLOR,
+    PREMIUM_COLOR,
+    SUCCESS_COLOR,
+    ERROR_COLOR,
+    WARNING_COLOR,
+    CYAN_COLOR,
+    progress_bar,
+    NexoraView,
+    DismissButton,
+    send_view,
+)
 
 logger = logging.getLogger(__name__)
 
+
 class GameStats(commands.Cog):
-    def __init__(self, bot):
+    """Mini-game statistics tracking and administration."""
+
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="game_stats", description="View your game stats")
-    async def game_stats(self, interaction: discord.Interaction):
-        """View your game statistics from the database"""
-        
-        # Enhanced database checking
-        if not getattr(self.bot, 'db_manager', None):
-            await interaction.response.send_message(
-                embed=discord.Embed(
-                    title="❌ Database Not Available",
-                    description="The database manager is not initialized.",
-                    color=discord.Color.red()
-                ),
-                ephemeral=True
-            )
-            return
-        
-        if not self.bot.db_manager.enabled:
-            await interaction.response.send_message(
-                embed=discord.Embed(
-                    title="❌ Database Required",
-                    description="Game stats require database functionality to be enabled.\n\n"
-                               "Database features are currently disabled in this bot instance.",
-                    color=discord.Color.red()
-                ),
-                ephemeral=True
-            )
-            return
-
-        user_id = str(interaction.user.id)
-        stats = {}
-        
-        try:
-            # Proper context manager usage for SQLite connection
-            with sqlite3.connect(self.bot.db_manager.db_path) as conn:
-                # Set row factory for easier data access
-                conn.row_factory = sqlite3.Row
-                cur = conn.cursor()
-                
-                # Check if game_sessions table exists
-                cur.execute('''
-                    SELECT name FROM sqlite_master 
-                    WHERE type='table' AND name='game_sessions'
-                ''')
-                
-                if not cur.fetchone():
-                    await interaction.response.send_message(
-                        embed=discord.Embed(
-                            title="❌ Game Table Not Found",
-                            description="The game sessions table doesn't exist in the database.\n"
-                                       "Play some games first to create stats!",
-                            color=discord.Color.orange()
-                        ),
-                        ephemeral=True
-                    )
-                    return
-                
-                # Fetch game statistics
-                cur.execute('''
-                    SELECT 
-                        game_type, 
-                        COUNT(*) as games_played, 
-                        MAX(score) as best_score, 
-                        AVG(score) as avg_score,
-                        MIN(score) as worst_score,
-                        SUM(score) as total_score
-                    FROM game_sessions
-                    WHERE user_id = ?
-                    GROUP BY game_type
-                    ORDER BY games_played DESC
-                ''', (user_id,))
-                
-                rows = cur.fetchall()
-                
-                for row in rows:
-                    game_type = row['game_type']
-                    stats[game_type] = {
-                        "games": row['games_played'] or 0,
-                        "best": row['best_score'] or 0,
-                        "worst": row['worst_score'] or 0,
-                        "avg": round(row['avg_score'] or 0, 2),
-                        "total": row['total_score'] or 0
-                    }
-                    
-        except sqlite3.DatabaseError as e:
-            logger.error(f"Database error fetching game stats for user {user_id}: {e}")
-            await interaction.response.send_message(
-                embed=discord.Embed(
-                    title="❌ Database Error",
-                    description="There was an error accessing your game statistics.\n"
-                               "Please try again later.",
-                    color=discord.Color.red()
-                ),
-                ephemeral=True
-            )
-            return
-            
-        except Exception as e:
-            logger.error(f"Unexpected error fetching game stats for user {user_id}: {e}")
-            await interaction.response.send_message(
-                embed=discord.Embed(
-                    title="❌ Unexpected Error",
-                    description="An unexpected error occurred while fetching your stats.",
-                    color=discord.Color.red()
-                ),
-                ephemeral=True
-            )
-            return
-
-        # Handle no stats found
-        if not stats:
-            embed = discord.Embed(
-                title="🎮 No Game History Found",
-                description="You haven't played any games yet!\n\n"
-                           "**Get started with:**\n"
-                           "• `/play_trivia` - Test your knowledge\n"
-                           "• `/play_guess` - Number guessing game\n"
-                           "• `/play_quiz` - Quick quiz challenges",
-                color=discord.Color.orange()
-            )
-            embed.set_footer(text="Play some games and check back later!")
-            
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
-        # Build comprehensive stats embed
-        embed = discord.Embed(
-            title=f"🎮 Game Statistics for {interaction.user.display_name}",
-            description=f"Your performance across **{len(stats)}** game types",
-            color=discord.Color.green(),
-            timestamp=discord.utils.utcnow()
-        )
-        
-        # Add user avatar
-        embed.set_thumbnail(url=interaction.user.display_avatar.url)
-        
-        # Calculate overall stats
-        total_games = sum(stat['games'] for stat in stats.values())
-        total_score = sum(stat['total'] for stat in stats.values())
-        overall_avg = round(total_score / total_games, 2) if total_games > 0 else 0
-        
-        # Add overall summary
-        embed.add_field(
-            name="📊 Overall Summary",
-            value=f"**Total Games:** {total_games}\n"
-                  f"**Total Score:** {total_score:,}\n"
-                  f"**Average Score:** {overall_avg}",
-            inline=False
-        )
-        
-        # Add individual game stats
-        for game_type, data in stats.items():
-            game_name = game_type.replace('_', ' ').title()
-            
-            # Calculate accuracy or performance indicator
-            if data['best'] > 0:
-                performance = round((data['avg'] / data['best']) * 100, 1)
-            else:
-                performance = 0
-            
-            value = f"**Games Played:** {data['games']}\n" \
-                   f"**Best Score:** {data['best']}\n" \
-                   f"**Average:** {data['avg']}\n" \
-                   f"**Performance:** {performance}%"
-            
-            embed.add_field(
-                name=f"🎯 {game_name}",
-                value=value,
-                inline=True
-            )
-        
-        # Add helpful footer
-        embed.set_footer(
-            text=f"Keep playing to improve your stats! • Total games: {total_games}",
-            icon_url=interaction.user.display_avatar.url
-        )
-        
-        await interaction.response.send_message(embed=embed)
-
-    @app_commands.command(name="leaderboard", description="View game leaderboards")
-    @app_commands.describe(
-        game_type="Specific game type to show leaderboard for",
-        limit="Number of top players to show (default: 10)"
+    @commands.hybrid_command(
+        name="gamestats",
+        aliases=["game_stats", "leaderboard_games"],
+        description="📊 View your lifetime mini-game statistics, win rates, and match records",
     )
-    async def leaderboard(self, interaction: discord.Interaction, game_type: str = None, limit: int = 10):
-        """Show game leaderboards"""
-        
-        if not getattr(self.bot, 'db_manager', None) or not self.bot.db_manager.enabled:
-            await interaction.response.send_message(
-                embed=discord.Embed(
-                    title="❌ Database Required",
-                    description="Leaderboards require database functionality.",
-                    color=discord.Color.red()
-                ),
-                ephemeral=True
-            )
-            return
-        
-        # Limit validation
-        if limit < 1 or limit > 25:
-            limit = 10
-        
-        try:
-            with sqlite3.connect(self.bot.db_manager.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                cur = conn.cursor()
-                
-                if game_type:
-                    # Specific game type leaderboard
-                    cur.execute('''
-                        SELECT 
-                            user_id,
-                            COUNT(*) as games,
-                            MAX(score) as best_score,
-                            AVG(score) as avg_score,
-                            SUM(score) as total_score
-                        FROM game_sessions
-                        WHERE game_type = ?
-                        GROUP BY user_id
-                        ORDER BY best_score DESC, avg_score DESC
-                        LIMIT ?
-                    ''', (game_type, limit))
-                    
-                    title = f"🏆 {game_type.replace('_', ' ').title()} Leaderboard"
-                else:
-                    # Overall leaderboard
-                    cur.execute('''
-                        SELECT 
-                            user_id,
-                            COUNT(*) as games,
-                            MAX(score) as best_score,
-                            AVG(score) as avg_score,
-                            SUM(score) as total_score
-                        FROM game_sessions
-                        GROUP BY user_id
-                        ORDER BY total_score DESC, best_score DESC
-                        LIMIT ?
-                    ''', (limit,))
-                    
-                    title = "🏆 Overall Game Leaderboard"
-                
-                rows = cur.fetchall()
-                
-                if not rows:
-                    await interaction.response.send_message(
-                        embed=discord.Embed(
-                            title="📊 No Leaderboard Data",
-                            description="No game data found for leaderboard.",
-                            color=discord.Color.orange()
-                        ),
-                        ephemeral=True
-                    )
-                    return
-                
-                embed = discord.Embed(
-                    title=title,
-                    description=f"Top {len(rows)} players",
-                    color=discord.Color.gold(),
-                    timestamp=discord.utils.utcnow()
-                )
-                
-                leaderboard_text = ""
-                medals = ["🥇", "🥈", "🥉"]
-                
-                for i, row in enumerate(rows):
-                    try:
-                        user = self.bot.get_user(int(row['user_id']))
-                        username = user.display_name if user else f"User {row['user_id']}"
-                    except:
-                        username = f"User {row['user_id']}"
-                    
-                    medal = medals[i] if i < 3 else f"{i+1}."
-                    
-                    leaderboard_text += f"{medal} **{username}**\n"
-                    leaderboard_text += f"    Games: {row['games']} | Best: {row['best_score']} | Avg: {round(row['avg_score'], 1)}\n\n"
-                
-                embed.description = f"Top {len(rows)} players\n\n{leaderboard_text}"
-                
-                await interaction.response.send_message(embed=embed)
-                
-        except Exception as e:
-            logger.error(f"Error fetching leaderboard: {e}")
-            await interaction.response.send_message(
-                embed=discord.Embed(
-                    title="❌ Error",
-                    description="Failed to fetch leaderboard data.",
-                    color=discord.Color.red()
-                ),
-                ephemeral=True
-            )
+    @app_commands.describe(member="Member to inspect stats for (leave blank for yourself)")
+    async def gamestats(self, ctx: commands.Context, member: Optional[discord.Member] = None):
+        target = member or ctx.author
+        doc = await get_user_stats(self.bot, target.id)
 
-async def setup(bot):
+        embed = discord.Embed(
+            title=f"🎮 Mini-Game Record · {target.display_name}",
+            color=BRAND_COLOR,
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.set_thumbnail(url=target.display_avatar.url)
+
+        # 1. Tic-Tac-Toe
+        ttt = doc.get("tictactoe", {})
+        ttt_played = ttt.get("played", 0)
+        ttt_wins = ttt.get("wins", 0)
+        ttt_losses = ttt.get("losses", 0)
+        ttt_draws = ttt.get("draws", 0)
+        ttt_wr = (ttt_wins / ttt_played * 100.0) if ttt_played > 0 else 0.0
+
+        ttt_meter = progress_bar(ttt_wins, max(1, ttt_played), length=10)
+        embed.add_field(
+            name="⚔️ Tic-Tac-Toe",
+            value=(
+                f"`[{ttt_meter}]` **{ttt_wr:.1f}% Win Rate**\n"
+                f"• Played: **{ttt_played}** · Won: **{ttt_wins}** · Lost: **{ttt_losses}** · Draws: **{ttt_draws}**"
+            ),
+            inline=False,
+        )
+
+        # 2. Rock-Paper-Scissors
+        rps = doc.get("rps", {})
+        rps_played = rps.get("played", 0)
+        rps_wins = rps.get("wins", 0)
+        rps_losses = rps.get("losses", 0)
+        rps_draws = rps.get("draws", 0)
+        rps_wr = (rps_wins / rps_played * 100.0) if rps_played > 0 else 0.0
+
+        rps_meter = progress_bar(rps_wins, max(1, rps_played), length=10)
+        embed.add_field(
+            name="🪨 Rock-Paper-Scissors",
+            value=(
+                f"`[{rps_meter}]` **{rps_wr:.1f}% Win Rate**\n"
+                f"• Played: **{rps_played}** · Won: **{rps_wins}** · Lost: **{rps_losses}** · Draws: **{rps_draws}**"
+            ),
+            inline=False,
+        )
+
+        # 3. Number Guessing
+        guess = doc.get("guess", {})
+        g_played = guess.get("played", 0)
+        g_wins = guess.get("wins", 0)
+        g_losses = guess.get("losses", 0)
+        g_wr = (g_wins / g_played * 100.0) if g_played > 0 else 0.0
+
+        g_meter = progress_bar(g_wins, max(1, g_played), length=10)
+        embed.add_field(
+            name="🔢 Number Guesser",
+            value=(
+                f"`[{g_meter}]` **{g_wr:.1f}% Win Rate**\n"
+                f"• Played: **{g_played}** · Solved: **{g_wins}** · Failed: **{g_losses}**"
+            ),
+            inline=False,
+        )
+
+        # 4. Connect Four
+        c4 = doc.get("connect4", {})
+        c4_played = c4.get("played", 0)
+        c4_wins = c4.get("wins", 0)
+        c4_losses = c4.get("losses", 0)
+        c4_draws = c4.get("draws", 0)
+        c4_wr = (c4_wins / c4_played * 100.0) if c4_played > 0 else 0.0
+
+        c4_meter = progress_bar(c4_wins, max(1, c4_played), length=10)
+        embed.add_field(
+            name="🔴🟡 Connect Four",
+            value=(
+                f"`[{c4_meter}]` **{c4_wr:.1f}% Win Rate**\n"
+                f"• Played: **{c4_played}** · Won: **{c4_wins}** · Lost: **{c4_losses}** · Draws: **{c4_draws}**"
+            ),
+            inline=False,
+        )
+
+        total_played = ttt_played + rps_played + g_played + c4_played
+        total_wins = ttt_wins + rps_wins + g_wins + c4_wins
+        overall_wr = (total_wins / total_played * 100.0) if total_played > 0 else 0.0
+
+        rank_title = (
+            "🌟 Grandmaster" if total_wins >= 25
+            else ("🥇 Veteran" if total_wins >= 10
+            else ("🥈 Contender" if total_wins >= 3
+            else "🥉 Rookie"))
+        )
+        embed.add_field(
+            name="🏆 Overall Performance",
+            value=f"Rank: **{rank_title}** · Total Matches: **{total_played}** · Overall Win Rate: **{overall_wr:.1f}%**",
+            inline=False,
+        )
+
+        embed.set_footer(text="Nexora Mini-Games · Stats are tracked permanently across every match!")
+        await ctx.send(embed=embed)
+
+    @commands.hybrid_command(
+        name="resetgamestats",
+        aliases=["cleargamestats", "resetgamestat"],
+        description="🛡️ Reset game stats for a user or the entire server (Admin only)",
+    )
+    @app_commands.describe(
+        scope="Choose whether to reset for a specific user or everyone in the server",
+        member="Target user if scope is user",
+        game="Specific game to reset (leave empty for all games)",
+    )
+    @app_commands.choices(
+        scope=[
+            app_commands.Choice(name="👤 Specific User", value="user"),
+            app_commands.Choice(name="🏰 Entire Server", value="server"),
+        ],
+        game=[
+            app_commands.Choice(name="🎮 All Games", value="all"),
+            app_commands.Choice(name="🪨 Rock-Paper-Scissors", value="rps"),
+            app_commands.Choice(name="⚔️ Tic-Tac-Toe", value="tictactoe"),
+            app_commands.Choice(name="🔴🟡 Connect Four", value="connect4"),
+            app_commands.Choice(name="🔢 Number Guesser", value="guess"),
+        ],
+    )
+    @commands.has_permissions(manage_guild=True)
+    @commands.guild_only()
+    async def resetgamestats(
+        self,
+        ctx: commands.Context,
+        scope: str = "user",
+        member: Optional[discord.Member] = None,
+        game: Optional[str] = "all",
+    ):
+        selected_game = None if (not game or game == "all") else game.lower()
+        game_label = f"**{selected_game.upper()}**" if selected_game else "**all mini-games**"
+
+        if scope == "server":
+            member_ids = [m.id for m in ctx.guild.members]
+            await reset_server_stats(self.bot, member_ids, game=selected_game)
+            view = NexoraView(color=WARNING_COLOR, timeout=60)
+            view.add_text(
+                f"# 🛡️ Server Game Stats Reset\n"
+                f"> Admin {ctx.author.mention} reset {game_label} stats for **all members in {ctx.guild.name}**."
+            )
+            view.add_footer("Nexora Mini-Game Administration")
+            await send_view(ctx, view)
+            logger.info("GameStats: %s reset server stats in %s (%s)", ctx.author, ctx.guild.name, game_label)
+        else:
+            target = member or ctx.author
+            await reset_user_stats(self.bot, target.id, game=selected_game)
+            view = NexoraView(color=SUCCESS_COLOR, timeout=60)
+            view.add_text(
+                f"# 🛡️ User Game Stats Reset\n"
+                f"> Reset {game_label} stats for {target.mention}."
+            )
+            view.add_footer("Nexora Mini-Game Administration")
+            await send_view(ctx, view)
+            logger.info("GameStats: %s reset stats for %s (%s)", ctx.author, target, game_label)
+
+    @commands.hybrid_command(
+        name="setgamestats",
+        aliases=["customizestats"],
+        description="⚙️ Customize/modify mini-game stats for a user (Admin/Owner)",
+    )
+    @app_commands.describe(
+        member="Target user to modify stats for",
+        game="Mini-game to adjust",
+        wins="Number of wins to set",
+        losses="Number of losses to set (default: 0)",
+        draws="Number of draws to set (default: 0)",
+    )
+    @app_commands.choices(
+        game=[
+            app_commands.Choice(name="🪨 Rock-Paper-Scissors", value="rps"),
+            app_commands.Choice(name="⚔️ Tic-Tac-Toe", value="tictactoe"),
+            app_commands.Choice(name="🔴🟡 Connect Four", value="connect4"),
+            app_commands.Choice(name="🔢 Number Guesser", value="guess"),
+        ]
+    )
+    @commands.has_permissions(administrator=True)
+    @commands.guild_only()
+    async def setgamestats(
+        self,
+        ctx: commands.Context,
+        member: discord.Member,
+        game: str,
+        wins: int,
+        losses: int = 0,
+        draws: int = 0,
+    ):
+        if wins < 0 or losses < 0 or draws < 0:
+            return await ctx.send("❌ Values cannot be negative numbers.", ephemeral=True)
+
+        g = game.lower()
+        if g not in ("rps", "tictactoe", "connect4", "guess"):
+            return await ctx.send("❌ Game must be `rps`, `tictactoe`, `connect4`, or `guess`.", ephemeral=True)
+
+        await set_user_stats(self.bot, member.id, g, wins, losses, draws)
+
+        view = NexoraView(color=SUCCESS_COLOR, timeout=60)
+        view.add_text(
+            f"# ⚙️ Game Stats Updated\n"
+            f"> Customized **{g.upper()}** record for {member.mention}:\n\n"
+            f"• **Wins:** `{wins}`\n"
+            f"• **Losses:** `{losses}`\n"
+            f"• **Draws:** `{draws}`\n"
+            f"• **Total Matches:** `{wins + losses + draws}`"
+        )
+        view.add_footer(f"Configured by Administrator {ctx.author.display_name}")
+        await send_view(ctx, view)
+        logger.info("GameStats: %s adjusted %s stats for %s (W:%d, L:%d, D:%d)", ctx.author, g, member, wins, losses, draws)
+
+
+async def setup(bot: commands.Bot):
     await bot.add_cog(GameStats(bot))
+    logger.debug("Loaded GameStats Cog")

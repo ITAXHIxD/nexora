@@ -10,14 +10,13 @@ class Poke(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.hybrid_command(name="poke", description="Poke someone!")
-    @app_commands.describe(user="Who do you want to poke?")
-    async def poke(self, ctx, user: Optional[discord.Member] = None):
-        target = user or ctx.author
+    @commands.command(name="poke", description="Poke someone!")
+    async def poke(self, ctx, *users: discord.Member):
+        targets = list(users) if users else [ctx.author]
 
         await send_owo_action_embed(
             ctx,
-            target,
+            targets,
             "poke",
             text_template="**{author}** pokes **{target}** gently~ 👉😳",
             self_template="**{author}** pokes themselves and giggles… okay cutie.",

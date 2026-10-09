@@ -7,7 +7,9 @@ High-performance in-memory caching with MongoDB backing and local fallback.
 """
 
 import datetime
+import json
 import logging
+import os
 import time
 from typing import Optional
 
@@ -27,6 +29,28 @@ from utils.ui import (
 )
 
 logger = logging.getLogger(__name__)
+
+AFK_DATA_FILE = "data/afk_data.json"
+
+
+def _load_afk_local() -> dict:
+    try:
+        if os.path.exists(AFK_DATA_FILE):
+            with open(AFK_DATA_FILE, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+                return {int(k): v for k, v in raw.items() if str(k).isdigit()}
+    except Exception as e:
+        logger.warning("AFK: Failed to load local AFK file: %s", e)
+    return {}
+
+
+def _save_afk_local(data: dict):
+    try:
+        os.makedirs("data", exist_ok=True)
+        with open(AFK_DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump({str(k): v for k, v in data.items()}, f, indent=4)
+    except Exception as e:
+        logger.warning("AFK: Failed to save local AFK file: %s", e)
 
 
 class AFKStatusSetView(NexoraView):
@@ -165,58 +189,81 @@ class AFK(commands.Cog):
         self._set_timestamps: dict[int, float] = {}  # user_id -> timestamp when AFK was set (grace period)
 
     async def cog_load(self):
+        # 1. Pre-seed from local storage
+        self.local_cache = _load_afk_local()
+        for uid in self.local_cache:
+            self.active_afk_cache.add(uid)
+
+        # 2. Sync from MongoDB if connected
         mongo = getattr(self.bot, "mongo_db", None)
         if mongo is not None:
             self.col = mongo["afk"]
             try:
-                cursor = self.col.find({}, {"_id": 1})
+                cursor = self.col.find({})
                 async for doc in cursor:
-                    self.active_afk_cache.add(doc["_id"])
-                logger.info("AFK: Cached %d active AFK users into memory", len(self.active_afk_cache))
+                    try:
+                        uid = int(doc["_id"])
+                        self.active_afk_cache.add(uid)
+                        self.local_cache[uid] = doc
+                    except Exception:
+                        pass
+                logger.info("AFK: Cached %d active AFK users into memory (Mongo + Local)", len(self.active_afk_cache))
             except Exception as e:
-                logger.warning("AFK: Failed to pre-seed AFK cache: %s", e)
+                logger.warning("AFK: Failed to pre-seed AFK cache from mongo: %s", e)
         else:
-            logger.warning("AFK: MongoDB not available, running in-memory fallback")
+            logger.info("AFK: Cached %d active AFK users from local storage", len(self.active_afk_cache))
         logger.debug("Loaded AFK")
 
     # ── Database & Cache Helpers ───────────────────────────────────────────────
 
     async def get_afk(self, user_id: int) -> Optional[dict]:
-        if user_id not in self.active_afk_cache and user_id not in self.local_cache:
+        uid = int(user_id)
+        if uid not in self.active_afk_cache and uid not in self.local_cache:
             return None
 
         if self.col is not None:
             try:
-                doc = await self.col.find_one({"_id": user_id})
+                doc = await self.col.find_one({"_id": uid})
                 if doc:
-                    self.active_afk_cache.add(user_id)
+                    self.active_afk_cache.add(uid)
+                    self.local_cache[uid] = doc
                     return doc
                 else:
-                    self.active_afk_cache.discard(user_id)
+                    doc = await self.col.find_one({"_id": str(uid)})
+                    if doc:
+                        self.active_afk_cache.add(uid)
+                        self.local_cache[uid] = doc
+                        return doc
+                    self.active_afk_cache.discard(uid)
             except Exception as e:
                 logger.warning("AFK: MongoDB find error, falling back to local: %s", e)
 
-        return self.local_cache.get(user_id)
+        return self.local_cache.get(uid)
 
     async def set_afk(self, user_id: int, data: dict):
-        self.active_afk_cache.add(user_id)
-        self.local_cache[user_id] = data
-        self._set_timestamps[user_id] = time.time()
+        uid = int(user_id)
+        self.active_afk_cache.add(uid)
+        self.local_cache[uid] = data
+        self._set_timestamps[uid] = time.time()
+        _save_afk_local(self.local_cache)
 
         if self.col is not None:
             try:
-                await self.col.update_one({"_id": user_id}, {"$set": data}, upsert=True)
+                await self.col.update_one({"_id": uid}, {"$set": data}, upsert=True)
             except Exception as e:
                 logger.warning("AFK: MongoDB save error: %s", e)
 
     async def delete_afk(self, user_id: int):
-        self.active_afk_cache.discard(user_id)
-        self.local_cache.pop(user_id, None)
-        self._set_timestamps.pop(user_id, None)
+        uid = int(user_id)
+        self.active_afk_cache.discard(uid)
+        self.local_cache.pop(uid, None)
+        self._set_timestamps.pop(uid, None)
+        _save_afk_local(self.local_cache)
 
         if self.col is not None:
             try:
-                await self.col.delete_one({"_id": user_id})
+                await self.col.delete_one({"_id": uid})
+                await self.col.delete_one({"_id": str(uid)})
             except Exception as e:
                 logger.warning("AFK: MongoDB delete error: %s", e)
 
@@ -378,7 +425,7 @@ class AFK(commands.Cog):
             send_fn,
         )
 
-    @commands.hybrid_command(name="unafk", description="👋 Manually remove your AFK status")
+    @commands.command(name="unafk", description="👋 Manually remove your AFK status")
     @commands.guild_only()
     async def unafk(self, ctx: commands.Context):
         afk_data = await self.get_afk(ctx.author.id)
@@ -397,8 +444,7 @@ class AFK(commands.Cog):
         view.add_footer("Nexora AFK Network")
         await send_view(ctx, view)
 
-    @commands.hybrid_command(name="afkstatus", description="🔍 Check AFK status of a user")
-    @app_commands.describe(user="User to check (leave blank for yourself)")
+    @commands.command(name="afkstatus", description="🔍 Check AFK status of a user")
     @commands.guild_only()
     async def afkstatus(self, ctx: commands.Context, user: Optional[discord.Member] = None):
         target = user or ctx.author
@@ -412,8 +458,7 @@ class AFK(commands.Cog):
         view = AFKInspectorView(target, afk_data, ctx.author)
         await send_view(ctx, view)
 
-    @commands.hybrid_command(name="afkclear", description="🛡️ Reset someone's AFK status (Moderator)")
-    @app_commands.describe(member="Member whose AFK status should be reset")
+    @commands.command(name="afkclear", description="🛡️ Reset someone's AFK status (Moderator)")
     @commands.has_permissions(manage_nicknames=True)
     @commands.guild_only()
     async def afkclear(self, ctx: commands.Context, member: discord.Member):
@@ -431,7 +476,7 @@ class AFK(commands.Cog):
         view.add_footer("Nexora Moderation Engine")
         await send_view(ctx, view)
 
-    @commands.hybrid_command(name="afklist", description="📋 List all AFK users in this server")
+    @commands.command(name="afklist", description="📋 List all AFK users in this server")
     @commands.has_permissions(manage_messages=True)
     @commands.guild_only()
     async def afklist(self, ctx: commands.Context):
@@ -462,8 +507,7 @@ class AFK(commands.Cog):
         view = AFKListView(ctx.guild, rows, ctx.author)
         await send_view(ctx, view)
 
-    @commands.hybrid_command(name="afksettings", description="⚙️ Toggle DM notifications for AFK mentions")
-    @app_commands.describe(dm_notifications="Enable or disable DM notifications")
+    @commands.command(name="afksettings", description="⚙️ Toggle DM notifications for AFK mentions")
     @commands.guild_only()
     async def afksettings(self, ctx: commands.Context, dm_notifications: bool):
         if not await self.get_afk(ctx.author.id):
@@ -520,13 +564,27 @@ class AFK(commands.Cog):
                                 view.add_footer("Nexora AFK Network")
                                 await message.channel.send(view=view)
 
-        # 2. Check if any mentioned users are AFK (O(1) set intersection check!)
-        if not message.mentions:
+        # 2. Check if any mentioned users or reply reference target is AFK
+        targets_to_check: list[discord.Member | discord.User] = []
+        if message.mentions:
+            for m in message.mentions:
+                if not m.bot and m.id != message.author.id:
+                    targets_to_check.append(m)
+
+        # Check if message is a reply to an AFK member
+        if message.reference and hasattr(message.reference, "resolved"):
+            ref = message.reference.resolved
+            if isinstance(ref, discord.Message) and ref.author and not ref.author.bot and ref.author.id != message.author.id:
+                if ref.author.id not in [t.id for t in targets_to_check]:
+                    member = message.guild.get_member(ref.author.id) or ref.author
+                    targets_to_check.append(member)
+
+        if not targets_to_check:
             return
 
         afk_mentioned_users = [
-            m for m in message.mentions
-            if m.id in self.active_afk_cache and not m.bot and m.id != message.author.id
+            m for m in targets_to_check
+            if int(m.id) in self.active_afk_cache
         ]
 
         if not afk_mentioned_users:
@@ -535,23 +593,30 @@ class AFK(commands.Cog):
         # Consolidate alerts to avoid multi-message channel clutter
         alert_lines = []
         for mentioned in afk_mentioned_users:
-            # Check 15s cooldown per (user, channel)
-            cooldown_key = (mentioned.id, message.channel.id)
+            # Check 4s cooldown per (author, target) pair to prevent spamming,
+            # but allow different users to always receive AFK notices!
+            cooldown_key = (message.author.id, mentioned.id)
             last_alert = self._mention_cooldowns.get(cooldown_key, 0)
-            if now_ts - last_alert < 15.0:
+            if now_ts - last_alert < 4.0:
                 continue
 
             afk_data = await self.get_afk(mentioned.id)
             if not afk_data:
                 continue
 
-            if not afk_data.get("global") and afk_data.get("guild_id") != message.guild.id:
+            target_guild = int(afk_data.get("guild_id") or 0)
+            if not afk_data.get("global") and target_guild != message.guild.id:
                 continue
 
             self._mention_cooldowns[cooldown_key] = now_ts
             delta = now_dt - datetime.datetime.fromisoformat(afk_data["time"])
             duration = self.format_duration(delta)
-            alert_lines.append(f"• **{mentioned.display_name}** is AFK: *{afk_data['reason']}* (Away for `{duration}`)")
+            reason_text = afk_data.get("reason", "AFK")
+            alert_lines.append(
+                f"• **{mentioned.display_name}** (`@{mentioned.name}`) is AFK!\n"
+                f"  > **Reason:** {reason_text}\n"
+                f"  > **Away for:** `{duration}`"
+            )
 
             # Record mention & send DM
             mention_str = f"[{message.author.name} in #{message.channel.name}]({message.jump_url})"
@@ -562,6 +627,7 @@ class AFK(commands.Cog):
                     pass
             if mentioned.id in self.local_cache:
                 self.local_cache[mentioned.id].setdefault("mentions", []).append(mention_str)
+                _save_afk_local(self.local_cache)
 
             if afk_data.get("dm_notifications", True):
                 try:
@@ -579,14 +645,21 @@ class AFK(commands.Cog):
                     pass
 
         if alert_lines:
-            view = NexoraView(color=BRAND_COLOR, timeout=45)
-            view.add_text("# 💤 Member AFK Notice\n" + "\n".join(alert_lines))
-            view.add_footer("Nexora AFK Network")
-            await message.channel.send(
-                view=view,
-                reference=message.to_reference(fail_if_not_exists=False),
-                allowed_mentions=discord.AllowedMentions.none(),
+            embed = discord.Embed(
+                title="💤 Member AFK Notice",
+                description="\n\n".join(alert_lines),
+                color=BRAND_COLOR,
+                timestamp=now_dt,
             )
+            embed.set_footer(text=f"Alert for @{message.author.display_name} · Nexora AFK Network")
+            try:
+                await message.channel.send(
+                    embed=embed,
+                    reference=message.to_reference(fail_if_not_exists=False),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except Exception as e:
+                logger.warning("AFK alert send failed: %s", e)
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):

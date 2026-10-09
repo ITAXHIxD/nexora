@@ -10,8 +10,7 @@ class Blush(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.hybrid_command(name="blush", description="Blush at someone.")
-    @app_commands.describe(user="Who makes you blush?")
+    @commands.command(name="blush", description="Blush at someone.")
     async def blush(self, ctx, user: Optional[discord.Member] = None):
         target = user or ctx.author
 

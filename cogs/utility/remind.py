@@ -169,7 +169,6 @@ class Remind(commands.Cog):
 
     @tasks.loop(seconds=10)
     async def check_reminders_task(self):
-        await self.bot.wait_until_ready()
         now_dt = datetime.datetime.now(datetime.timezone.utc)
         now_iso = now_dt.isoformat()
 
@@ -245,6 +244,10 @@ class Remind(commands.Cog):
                     except Exception:
                         pass
 
+    @check_reminders_task.before_loop
+    async def before_check_reminders(self):
+        await self.bot.wait_until_ready()
+
     # ── Commands ───────────────────────────────────────────────────────────────
 
     @commands.hybrid_command(
@@ -272,6 +275,18 @@ class Remind(commands.Cog):
 
         if td.total_seconds() > 365 * 86400:
             return await ctx.send("❌ Reminders cannot be set more than 1 year in advance.", ephemeral=True)
+
+        existing = await self.get_user_reminders(ctx.author.id)
+        is_vip = False
+        if hasattr(self.bot, "is_premium_user"):
+            is_vip = await self.bot.is_premium_user(ctx.author.id)
+        max_reminders = 50 if is_vip else 5
+        if len(existing) >= max_reminders:
+            return await ctx.send(
+                f"❌ **Reminder Limit Reached**: You currently have `{len(existing)}/{max_reminders}` scheduled reminders.\n"
+                f"{'Use `/delreminder <id>` to free up a slot.' if is_vip else '⭐ Upgrade to **Nexora VIP** (`/premium_price`) to unlock up to **50** reminders!'}",
+                ephemeral=True,
+            )
 
         due_at = datetime.datetime.now(datetime.timezone.utc) + td
         dur_str = fmt_duration(td)

@@ -6,7 +6,7 @@ Interactive Components V2 Member Profile Dossier
 """
 
 import logging
-from typing import Optional
+from typing import Optional, Union
 
 import discord
 from discord import app_commands
@@ -29,11 +29,13 @@ class UserInfoView(NexoraView):
 
     def __init__(
         self,
-        target: discord.Member,
+        target: Union[discord.Member, discord.User],
         requester: discord.abc.User,
         timeout: float = 180,
     ):
-        color = target.color.value if target.color.value else BRAND_COLOR
+        color = BRAND_COLOR
+        if isinstance(target, discord.Member) and target.color and target.color.value:
+            color = target.color.value
         super().__init__(user_id=requester.id, color=color, timeout=timeout)
         self.target = target
         self.requester = requester
@@ -42,51 +44,31 @@ class UserInfoView(NexoraView):
     def _build(self):
         self.clear_container()
         u = self.target
+        is_member = isinstance(u, discord.Member)
 
         # Badges & Flags
         badges = []
-        if u.id == u.guild.owner_id:
+        if is_member and u.guild and u.id == u.guild.owner_id:
             badges.append("👑 **Owner**")
-        if u.guild_permissions.administrator:
+        if is_member and getattr(u.guild_permissions, "administrator", False):
             badges.append("🛡️ **Admin**")
-        if u.premium_since:
+        if is_member and getattr(u, "premium_since", None):
             badges.append("💎 **Booster**")
         if u.bot:
             badges.append("🤖 **Bot**")
-        badge_line = " · ".join(badges) if badges else "👤 **Member**"
+        
+        if not badges:
+            badge_line = "👤 **Member**" if is_member else "🌐 **Discord User**"
+        else:
+            badge_line = " · ".join(badges)
 
-        # Roles
-        guild_roles = [r for r in u.roles if r.name != "@everyone"]
-        guild_roles.reverse()  # Highest first
-        roles_mentions = [r.mention for r in guild_roles[:12]]
-        roles_str = ", ".join(roles_mentions) if roles_mentions else "None"
-        if len(guild_roles) > 12:
-            roles_str += f" *(+{len(guild_roles) - 12} more)*"
-
-        # Key Permissions
-        key_perms = []
-        p = u.guild_permissions
-        if p.administrator:
-            key_perms.append("Administrator")
-        if p.manage_guild:
-            key_perms.append("Manage Server")
-        if p.manage_roles:
-            key_perms.append("Manage Roles")
-        if p.manage_channels:
-            key_perms.append("Manage Channels")
-        if p.ban_members:
-            key_perms.append("Ban Members")
-        if p.kick_members:
-            key_perms.append("Kick Members")
-        if p.manage_messages:
-            key_perms.append("Manage Messages")
-        perms_str = " · ".join(f"`{k}`" for k in key_perms[:6]) if key_perms else "`Standard Member`"
+        status_text = status_badge(u.status) if is_member and hasattr(u, "status") else "🌐 `External/Offline`"
 
         # ── Header Section ────────────────────────────────────────────────────
         header_text = (
             f"# {u.display_name}\n"
             f"> `@{u.name}` · ID: `{u.id}`\n"
-            f"{badge_line} · {status_badge(u.status)}"
+            f"{badge_line} · {status_text}"
         )
         avatar_url = str(u.display_avatar.url)
         self.add_section(header_text, thumbnail_url=avatar_url)
@@ -96,8 +78,8 @@ class UserInfoView(NexoraView):
         created_str = f"{ts_format(u.created_at, 'D')} ({ts_format(u.created_at, 'R')})"
         joined_str = (
             f"{ts_format(u.joined_at, 'D')} ({ts_format(u.joined_at, 'R')})"
-            if u.joined_at
-            else "Unknown"
+            if is_member and getattr(u, "joined_at", None)
+            else "Not in this server"
         )
         dates_block = (
             "### 📅 Timeline\n"
@@ -108,13 +90,44 @@ class UserInfoView(NexoraView):
         self.add_separator(discord.SeparatorSpacing.small)
 
         # ── Roles & Key Permissions Block ─────────────────────────────────────
-        top_role = u.top_role.mention if u.top_role.name != "@everyone" else "None"
-        roles_block = (
-            "### 🎭 Roles & Permissions\n"
-            f"• **Top Role:** {top_role} · **Total:** `{len(guild_roles)}`\n"
-            f"• **Key Perms:** {perms_str}\n"
-            f"• **Assigned Roles:**\n  {roles_str}"
-        )
+        if is_member:
+            guild_roles = [r for r in u.roles if r.name != "@everyone"]
+            guild_roles.reverse()  # Highest first
+            roles_mentions = [r.mention for r in guild_roles[:12]]
+            roles_str = ", ".join(roles_mentions) if roles_mentions else "None"
+            if len(guild_roles) > 12:
+                roles_str += f" *(+{len(guild_roles) - 12} more)*"
+
+            key_perms = []
+            p = u.guild_permissions
+            if p.administrator:
+                key_perms.append("Administrator")
+            if p.manage_guild:
+                key_perms.append("Manage Server")
+            if p.manage_roles:
+                key_perms.append("Manage Roles")
+            if p.manage_channels:
+                key_perms.append("Manage Channels")
+            if p.ban_members:
+                key_perms.append("Ban Members")
+            if p.kick_members:
+                key_perms.append("Kick Members")
+            if p.manage_messages:
+                key_perms.append("Manage Messages")
+            perms_str = " · ".join(f"`{k}`" for k in key_perms[:6]) if key_perms else "`Standard Member`"
+
+            top_role = u.top_role.mention if u.top_role.name != "@everyone" else "None"
+            roles_block = (
+                "### 🎭 Roles & Permissions\n"
+                f"• **Top Role:** {top_role} · **Total:** `{len(guild_roles)}`\n"
+                f"• **Key Perms:** {perms_str}\n"
+                f"• **Assigned Roles:**\n  {roles_str}"
+            )
+        else:
+            roles_block = (
+                "### 🎭 Roles & Permissions\n"
+                "• *This user is not currently in this server.*"
+            )
         self.add_text(roles_block)
 
         # ── Footer ────────────────────────────────────────────────────────────
@@ -150,10 +163,10 @@ class UserInfo(commands.Cog):
     @commands.hybrid_command(
         name="userinfo",
         description="👤 View detailed user dossier, roles, and permissions",
-        aliases=["ui"],
+        aliases=["ui", "whois"],
     )
-    @app_commands.describe(user="User to inspect (defaults to yourself)")
-    async def userinfo(self, ctx: commands.Context, user: Optional[discord.Member] = None):
+    @app_commands.describe(user="User or member to inspect (defaults to yourself)")
+    async def userinfo(self, ctx: commands.Context, user: Optional[Union[discord.Member, discord.User]] = None):
         target = user or ctx.author
         if not isinstance(target, discord.Member) and ctx.guild:
             target = ctx.guild.get_member(target.id) or target

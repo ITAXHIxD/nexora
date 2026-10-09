@@ -388,7 +388,14 @@ class Analytics(commands.Cog):
         
         stats = getattr(self.bot, 'bot_stats', {})
         
-        uptime = datetime.now() - stats.get('start_time', datetime.now())
+        start_t = stats.get('start_time')
+        if start_t and getattr(start_t, "tzinfo", None) is not None:
+            uptime = discord.utils.utcnow() - start_t
+        elif start_t:
+            uptime = datetime.now() - start_t
+        else:
+            uptime = datetime.now() - datetime.now()
+
         uptime_str = f"{uptime.days}d {uptime.seconds//3600}h {(uptime.seconds//60)%60}m {uptime.seconds%60}s"
 
         total_commands = len(self.bot.tree.get_commands())
@@ -415,7 +422,7 @@ class Analytics(commands.Cog):
             inline=True
         )
         
-        if self.bot.command_stats:
+        if hasattr(self.bot, "command_stats") and self.bot.command_stats:
             top_commands = sorted(
                 self.bot.command_stats.items(), 
                 key=lambda x: x[1], 
@@ -468,7 +475,7 @@ class Analytics(commands.Cog):
                 "humans": sum(1 for m in guild.members if not m.bot),
                 "online": sum(1 for m in guild.members if m.status != discord.Status.offline)
             },
-            "timestamp_utc": datetime.utcnow().isoformat()
+            "timestamp_utc": discord.utils.utcnow().isoformat()
         }
         
         data_bytes = json.dumps(analytics_data, indent=2, default=str).encode('utf-8')
@@ -485,7 +492,10 @@ class Analytics(commands.Cog):
             color=embed_color
         )
         
-        await ctx.followup.send(embed=embed, file=file, ephemeral=True)
+        if ctx.interaction:
+            await ctx.interaction.followup.send(embed=embed, file=file, ephemeral=True)
+        else:
+            await ctx.send(embed=embed, file=file)
 
 async def setup(bot):
     await bot.add_cog(Analytics(bot))

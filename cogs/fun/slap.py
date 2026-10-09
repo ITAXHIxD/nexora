@@ -9,16 +9,15 @@ class Slap(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.hybrid_command(name="slap", description="Slap someone playfully.")
-    @app_commands.describe(user="Who do you want to slap?")
-    async def slap(self, ctx, user: Optional[discord.Member] = None):
-        if user is None:
+    @commands.command(name="slap", description="Slap someone playfully.")
+    async def slap(self, ctx, *users: discord.Member):
+        if not users:
             await ctx.send("You swing at the air like a clown. 👋🤣")
             return
 
         await send_owo_action_embed(
             ctx,
-            user,
+            list(users),
             "slap",
             text_template="**{author}** slaps **{target}**! (playfully... maybe) 👋😳",
             self_template="**{author}** slaps themselves??? why tho 💀",

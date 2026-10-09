@@ -13,17 +13,16 @@ class Pat(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.hybrid_command(
+    @commands.command(
         name="pat",
         description="Pat someone in a cute way."
     )
-    @app_commands.describe(user="Who do you want to pat?")
-    async def pat(self, ctx: commands.Context, user: Optional[discord.Member] = None):
-        target = user or ctx.author
+    async def pat(self, ctx: commands.Context, *users: discord.Member):
+        targets = list(users) if users else [ctx.author]
 
         await send_owo_action_embed(
             ctx,
-            target,
+            targets,
             "pat",  # will load data/owo_gifs/pat.json
             text_template="**{author}** gently pats **{target}** on the head… uwu ✨",
             self_template="**{author}** pats themselves softly… are you okay, friend? 🤍",

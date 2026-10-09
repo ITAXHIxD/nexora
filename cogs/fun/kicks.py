@@ -13,19 +13,18 @@ class Kicks(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.hybrid_command(
+    @commands.command(
         name="kicks",
         description="Kick someone (playfully, probably)."
     )
-    @app_commands.describe(user="Who do you want to kick?")
-    async def kick(self, ctx: commands.Context, user: Optional[discord.Member] = None):
-        if user is None:
+    async def kick(self, ctx: commands.Context, *users: discord.Member):
+        if not users:
             await ctx.send("Tag someone to kick, you little gremlin.")
             return
 
         await send_owo_action_embed(
             ctx,
-            user,
+            list(users),
             "kicks",  # data/owo_gifs/kick.json
             text_template="**{author}** yeets **{target}** with a smol and hard kick",
             self_template="**{author}** tries to kick themselves and almost falls over. (╯°□°）╯︵ ┻━┻",

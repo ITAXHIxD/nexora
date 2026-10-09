@@ -4,8 +4,32 @@ import json
 import logging
 import os
 import random
+import subprocess
 import sys
 from datetime import datetime, timezone
+
+# Auto-install missing dependencies on cloud hosts like WispByte
+_REQUIRED_PACKAGES = {
+    "PIL": "pillow",
+    "psutil": "psutil",
+    "motor": "motor",
+    "dotenv": "python-dotenv",
+}
+_missing_pkgs = []
+for _mod, _pkg in _REQUIRED_PACKAGES.items():
+    try:
+        __import__(_mod)
+    except ImportError:
+        _missing_pkgs.append(_pkg)
+
+if _missing_pkgs:
+    print(f"[Startup] Installing missing packages {_missing_pkgs}...")
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", *_missing_pkgs])
+        print("[Startup] All required packages installed successfully!")
+    except Exception as _err:
+        print(f"[Startup] Could not auto-install packages: {_err}")
+
 
 import aiohttp
 import discord
@@ -35,8 +59,10 @@ except ImportError:
     )
 # ──────────────────────────────────────────────────────────────────────────────
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+if hasattr(sys.stdout, "buffer") and sys.stdout.buffer is not None:
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "buffer") and sys.stderr.buffer is not None:
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -71,13 +97,21 @@ CREATIVE_ACTIVITIES = [
     {"type": discord.ActivityType.playing, "name": "n!help | /help for commands"},
     {"type": discord.ActivityType.playing, "name": "with {user_count} friends across {server_count} servers"},
     {"type": discord.ActivityType.playing, "name": "chess with quantum algorithms"},
-    {"type": discord.ActivityType.playing, "name": "Truth or Dare | n!tod"},
+    {"type": discord.ActivityType.playing, "name": "Truth or Dare | n!tod & n!truth"},
     {"type": discord.ActivityType.playing, "name": "Would You Rather | n!wyr"},
     {"type": discord.ActivityType.playing, "name": "Rock Paper Scissors | n!rps"},
-    {"type": discord.ActivityType.playing, "name": "Tic-Tac-Toe championship"},
+    {"type": discord.ActivityType.playing, "name": "Tic-Tac-Toe championship | n!ttt"},
+    {"type": discord.ActivityType.playing, "name": "Connect 4 World League | n!connect4"},
+    {"type": discord.ActivityType.playing, "name": "Guess The Number Duel | n!guess"},
+    {"type": discord.ActivityType.playing, "name": "Reddit Stream & Memes | n!reddit"},
     {"type": discord.ActivityType.playing, "name": "Minecraft hardcore in {server_count} realms"},
     {"type": discord.ActivityType.playing, "name": "Cyberpunk 2077 in 8K HDR"},
     {"type": discord.ActivityType.playing, "name": "Elden Ring: Shadow of the Erdtree"},
+    {"type": discord.ActivityType.playing, "name": "Genshin Impact with max Primogems"},
+    {"type": discord.ActivityType.playing, "name": "Honkai: Star Rail in Astral Express"},
+    {"type": discord.ActivityType.playing, "name": "Pokemon Showdown OU League"},
+    {"type": discord.ActivityType.playing, "name": "Super Smash Bros Ultimate"},
+    {"type": discord.ActivityType.playing, "name": "League of Legends with 0 toxicity"},
     {"type": discord.ActivityType.playing, "name": "with Discord Components V2"},
     {"type": discord.ActivityType.playing, "name": "matchmaker | n!ship"},
     {"type": discord.ActivityType.playing, "name": "detective in #general"},
@@ -89,18 +123,27 @@ CREATIVE_ACTIVITIES = [
     {"type": discord.ActivityType.playing, "name": "in {server_count} parallel dimensions"},
     {"type": discord.ActivityType.playing, "name": "the Turing Test Championship"},
     {"type": discord.ActivityType.playing, "name": "Valorant ranked with the dev team"},
+    {"type": discord.ActivityType.playing, "name": "GTA VI in exclusive early access"},
+    {"type": discord.ActivityType.playing, "name": "infinite aura generator | n!aura"},
     {"type": discord.ActivityType.playing, "name": "synthwave in high fidelity"},
 
     # ── Watching ──
     {"type": discord.ActivityType.watching, "name": "over {user_count} incredible souls"},
     {"type": discord.ActivityType.watching, "name": "{server_count} servers thrive & grow"},
     {"type": discord.ActivityType.watching, "name": "One Piece episode {random_ep}"},
+    {"type": discord.ActivityType.watching, "name": "Jujutsu Kaisen Season 3 leaks"},
+    {"type": discord.ActivityType.watching, "name": "Demon Slayer: Infinity Castle arc"},
+    {"type": discord.ActivityType.watching, "name": "Chainsaw Man in IMAX 3D"},
     {"type": discord.ActivityType.watching, "name": "the multiverse unfold"},
     {"type": discord.ActivityType.watching, "name": "for spam and rule breakers"},
     {"type": discord.ActivityType.watching, "name": "the audit logs closely"},
     {"type": discord.ActivityType.watching, "name": "anime in 4K with the community"},
     {"type": discord.ActivityType.watching, "name": "Interstellar for the 100th time"},
     {"type": discord.ActivityType.watching, "name": "matrix code rain in dark mode"},
+    {"type": discord.ActivityType.watching, "name": "cat memes in 4K resolution"},
+    {"type": discord.ActivityType.watching, "name": "r/memes top posts of all time"},
+    {"type": discord.ActivityType.watching, "name": "over AFK members sleeping peacefully | n!afk"},
+    {"type": discord.ActivityType.watching, "name": "Twitch Rivals championship"},
     {"type": discord.ActivityType.watching, "name": "stars ignite across distant galaxies"},
     {"type": discord.ActivityType.watching, "name": "n!help requests in real time"},
     {"type": discord.ActivityType.watching, "name": "sunrise over {server_count} servers"},
@@ -112,8 +155,12 @@ CREATIVE_ACTIVITIES = [
     # ── Listening ──
     {"type": discord.ActivityType.listening, "name": "the echo of {user_count} voices"},
     {"type": discord.ActivityType.listening, "name": "whispers from other dimensions"},
-    {"type": discord.ActivityType.listening, "name": "lo-fi hip hop radio 24/7"},
-    {"type": discord.ActivityType.listening, "name": "synthwave beats to chill/code to"},
+    {"type": discord.ActivityType.listening, "name": "phonk drift music at 3 AM"},
+    {"type": discord.ActivityType.listening, "name": "anime opening themes on blast"},
+    {"type": discord.ActivityType.listening, "name": "smooth city pop from Tokyo 1986"},
+    {"type": discord.ActivityType.listening, "name": "lo-fi beats to grind commands to"},
+    {"type": discord.ActivityType.listening, "name": "voice channel karaoke sessions"},
+    {"type": discord.ActivityType.listening, "name": "keyboard clicks of late-night coders"},
     {"type": discord.ActivityType.listening, "name": "rain sounds on a cozy Discord night"},
     {"type": discord.ActivityType.listening, "name": "the heartbeat of the server"},
     {"type": discord.ActivityType.listening, "name": "Spotify with friends | n!spotify"},
@@ -126,7 +173,10 @@ CREATIVE_ACTIVITIES = [
     # ── Competing ──
     {"type": discord.ActivityType.competing, "name": "the Grand Discord Bot Tournament"},
     {"type": discord.ActivityType.competing, "name": "speedrunning server setups"},
-    {"type": discord.ActivityType.competing, "name": "Rock-Paper-Scissors World League"},
+    {"type": discord.ActivityType.competing, "name": "Rock-Paper-Scissors World League | n!rps"},
+    {"type": discord.ActivityType.competing, "name": "Connect 4 Grandmaster Tournament | n!connect4"},
+    {"type": discord.ActivityType.competing, "name": "Tic-Tac-Toe Flawless Streak | n!ttt"},
+    {"type": discord.ActivityType.competing, "name": "Guess the Number psychic showdown | n!guess"},
     {"type": discord.ActivityType.competing, "name": "the Ultimate Trivia Showdown"},
     {"type": discord.ActivityType.competing, "name": "the Turing Test Grand Finals"},
     {"type": discord.ActivityType.competing, "name": "fastest response time in {server_count} guilds"},
@@ -178,6 +228,8 @@ EXTENSIONS = [
     "cogs.games.say",
     "cogs.games.tictactoe",
     "cogs.games.rps",
+    "cogs.games.guess",
+    "cogs.games.connect4",
     "cogs.info.botinfo",
     "cogs.info.invite",
     "cogs.info.serverinfo",
@@ -187,7 +239,6 @@ EXTENSIONS = [
     "cogs.info.roleinfo",
     "cogs.info.channelinfo",
     "cogs.owner.owner",
-    "cogs.premium.vanity",
     "cogs.system.guideline_mode",
     "cogs.system.thread_manager",
     "cogs.utility.afk",
@@ -208,6 +259,11 @@ EXTENSIONS = [
     "cogs.moderation.warn",
     "cogs.moderation.lockdown",
     "cogs.premium_main",
+    "cogs.premium.user_vip",
+    "cogs.premium.booster_role",
+    "cogs.premium.autoreply",
+    "cogs.premium.embed_studio",
+    "cogs.premium.server_growth",
     "utils.error_handler",
 ]
 
@@ -219,11 +275,15 @@ class CharacterBot(commands.Bot):
         intents.members = True
         intents.presences = True
 
+        app_id_env = os.getenv("APPLICATION_ID", "1167464602620145808")
+        app_id = int(app_id_env) if app_id_env and app_id_env.isdigit() else 1167464602620145808
+
         super().__init__(
             command_prefix=commands.when_mentioned_or(DEFAULT_PREFIX, DEFAULT_PREFIX.swapcase()),
             intents=intents,
             help_command=None,
             case_insensitive=True,
+            application_id=app_id,
         )
 
         self.bot_config = bot_config
@@ -379,6 +439,9 @@ class CharacterBot(commands.Bot):
         logger.debug("Loaded premium tiers")
 
     def is_premium_guild(self, guild_id: int) -> bool:
+        gid = int(guild_id)
+        if gid in self.premium_guild_ids or str(gid) in self.premium_guild_ids:
+            return True
         guild_str = str(guild_id)
         try:
             premium_data = load_premium_data()
@@ -395,9 +458,7 @@ class CharacterBot(commands.Bot):
         except Exception as e:
             logger.error("Error reading premium runtime data: %s", e)
 
-        if guild_str in self.premium_guild_ids:
-            return True
-        return self.premium_guild_tiers.get(guild_str, "free").lower() != "free"
+        return self.premium_guild_tiers.get(gid, "free").lower() != "free" or self.premium_guild_tiers.get(guild_str, "free").lower() != "free"
 
     # ── Support & System Logging ───────────────────────────────────────────────
 
@@ -615,6 +676,9 @@ async def on_message(message: discord.Message):
 
 
 async def main():
+    if not DISCORD_TOKEN:
+        logger.critical("❌ DISCORD_TOKEN is not set! Ensure your .env file or environment variable is configured on WispByte.")
+        return
     await bot.start(DISCORD_TOKEN)
 
 

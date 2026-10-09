@@ -1,8 +1,12 @@
 """
 cogs/games/rps.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Interactive Components V2 Rock-Paper-Scissors Engine
-Supports both Solo (vs Bot) and 2-Player duel modes with interactive buttons.
+Interactive Components V2 Rock-Paper-Scissors Engine.
+
+Supports:
+  • Solo Mode vs Nexora AI with streak tracking & commentary
+  • 2-Player Multiplayer Duel with hidden choices, rematch button,
+    turn-based notifications, and permanent lifetime scoreboards.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
@@ -14,6 +18,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from utils.game_stats import record_game
 from utils.ui import (
     BRAND_COLOR,
     ERROR_COLOR,
@@ -67,12 +72,14 @@ DUEL_WIN_COMMENTARY = [
 
 
 class SoloRPSView(NexoraView):
-    """Components V2 Solo Rock-Paper-Scissors game vs Bot."""
+    """Components V2 Solo Rock-Paper-Scissors game vs Bot with streak tracker."""
 
     def __init__(self, bot: commands.Bot, player: discord.abc.User, timeout: float = 60.0):
         super().__init__(bot=bot, user_id=player.id, color=BRAND_COLOR, timeout=timeout)
         self.player = player
         self.is_finished = False
+        self.streak = 0
+        self.best_streak = 0
         self._build_board()
 
     def _build_board(
@@ -84,11 +91,18 @@ class SoloRPSView(NexoraView):
     ):
         self.clear_container()
 
+        streak_badge = (
+            f"🔥 Current Streak: **{self.streak}** (Best: {self.best_streak})"
+            if self.streak > 0
+            else f"Best Streak: **{self.best_streak}**"
+        )
+
         if not self.is_finished:
             header = (
                 f"# 🪨 Rock · 📄 Paper · ✂️ Scissors\n"
                 f"> Playing against **{self.bot.user.name if self.bot.user else 'Nexora'}**\n\n"
-                f"Choose your move below!"
+                f"Choose your move below!\n"
+                f"-# {streak_badge}"
             )
             self.add_section(header, thumbnail_url=str(self.player.display_avatar.url))
             self.add_separator(discord.SeparatorSpacing.small)
@@ -111,7 +125,8 @@ class SoloRPSView(NexoraView):
                 f"# ⚔️ Match Result · {result_text}\n"
                 f"> You chose: {p_info['emoji']} **{p_info['label']}**\n"
                 f"> Nexora chose: {b_info['emoji']} **{b_info['label']}**\n\n"
-                f"> *\"{commentary}\"*"
+                f"> *\"{commentary}\"*\n"
+                f"-# {streak_badge}"
             )
             self.add_section(header, thumbnail_url=str(self.player.display_avatar.url))
             self.add_separator(discord.SeparatorSpacing.small)
@@ -123,6 +138,9 @@ class SoloRPSView(NexoraView):
 
     def _make_choice_callback(self, choice: str):
         async def callback(interaction: discord.Interaction):
+            if not self.message and interaction.message:
+                self.message = interaction.message
+
             bot_choice = random.choice(list(CHOICES.keys()))
             self.is_finished = True
 
@@ -130,14 +148,21 @@ class SoloRPSView(NexoraView):
                 result = "It's a Tie! 🤝"
                 self._color = WARNING_COLOR
                 commentary = random.choice(TIE_COMMENTARY)
+                await record_game(self.bot, self.player.id, "rps", "draw")
             elif CHOICES[choice]["beats"] == bot_choice:
                 result = "You Won! 🏆"
                 self._color = SUCCESS_COLOR
+                self.streak += 1
+                if self.streak > self.best_streak:
+                    self.best_streak = self.streak
                 commentary = random.choice(SOLO_WIN_COMMENTARY)
+                await record_game(self.bot, self.player.id, "rps", "win")
             else:
                 result = "Nexora Won! 🤖"
                 self._color = ERROR_COLOR
+                self.streak = 0
                 commentary = random.choice(SOLO_LOSS_COMMENTARY)
+                await record_game(self.bot, self.player.id, "rps", "loss")
 
             self._build_board(
                 player_choice=choice,
@@ -150,6 +175,8 @@ class SoloRPSView(NexoraView):
         return callback
 
     async def _on_play_again(self, interaction: discord.Interaction):
+        if not self.message and interaction.message:
+            self.message = interaction.message
         self.is_finished = False
         self._color = BRAND_COLOR
         self._build_board()
@@ -157,32 +184,41 @@ class SoloRPSView(NexoraView):
 
 
 class DuelRPSView(NexoraView):
-    """Components V2 2-Player Rock-Paper-Scissors Duel."""
+    """Components V2 2-Player Rock-Paper-Scissors Duel with Rematch support and turn alerts."""
 
     def __init__(
         self,
         bot: commands.Bot,
         player1: discord.Member,
         player2: discord.Member,
+        session_scores: Optional[dict] = None,
         timeout: float = 90.0,
     ):
         super().__init__(bot=bot, color=BRAND_COLOR, timeout=timeout)
         self.player1 = player1
         self.player2 = player2
-        self.choices: dict[int, str] = {}  # user_id -> choice
+        self.choices: dict[int, str] = {}
+        self.scores = session_scores or {player1.id: 0, player2.id: 0, "draws": 0}
+        self.is_finished = False
         self._build()
 
     def _build(self):
         self.clear_container()
 
-        p1_status = "✅ Chosen" if self.player1.id in self.choices else "⏳ Choosing..."
-        p2_status = "✅ Chosen" if self.player2.id in self.choices else "⏳ Choosing..."
+        p1_status = "✅ Locked In" if self.player1.id in self.choices else "⏳ Choosing..."
+        p2_status = "✅ Locked In" if self.player2.id in self.choices else "⏳ Choosing..."
+        score_line = (
+            f"Score: `{self.player1.display_name}` **{self.scores[self.player1.id]}**  |  "
+            f"`{self.player2.display_name}` **{self.scores[self.player2.id]}**  |  "
+            f"Draws **{self.scores['draws']}**"
+        )
 
         header = (
             f"# ⚔️ Rock-Paper-Scissors Duel!\n"
             f"> 👤 {self.player1.mention}: **{p1_status}**\n"
             f"> 👤 {self.player2.mention}: **{p2_status}**\n\n"
-            f"Click your move below. Your choice remains hidden until both players choose!"
+            f"Click your move below. Choices remain hidden until both players choose!\n"
+            f"-# {score_line}"
         )
         self.add_section(header)
         self.add_separator(discord.SeparatorSpacing.small)
@@ -200,6 +236,9 @@ class DuelRPSView(NexoraView):
 
     def _make_duel_callback(self, choice: str):
         async def callback(interaction: discord.Interaction):
+            if not self.message and interaction.message:
+                self.message = interaction.message
+
             uid = interaction.user.id
             if uid not in (self.player1.id, self.player2.id):
                 return await interaction.response.send_message("❌ You are not a player in this duel!", ephemeral=True)
@@ -211,16 +250,24 @@ class DuelRPSView(NexoraView):
             c_info = CHOICES[choice]
             await interaction.response.send_message(f"🔒 Locked in: {c_info['emoji']} **{c_info['label']}**!", ephemeral=True)
 
-            if len(self.choices) == 2:
-                # Both picked!
-                self._reveal_results()
+            # Turn-based ping for opponent if only 1 has chosen
+            if len(self.choices) == 1:
+                other_player = self.player2 if uid == self.player1.id else self.player1
+                self._build()
                 if self.message:
                     try:
                         await self.message.edit(view=self)
                     except Exception:
                         pass
-            else:
-                self._build()
+                try:
+                    await interaction.channel.send(
+                        f"🔔 {other_player.mention}, your opponent locked in their move! Choose yours to reveal the winner!",
+                        delete_after=10,
+                    )
+                except Exception:
+                    pass
+            elif len(self.choices) == 2:
+                await self._reveal_results()
                 if self.message:
                     try:
                         await self.message.edit(view=self)
@@ -229,8 +276,9 @@ class DuelRPSView(NexoraView):
 
         return callback
 
-    def _reveal_results(self):
+    async def _reveal_results(self):
         self.clear_container()
+        self.is_finished = True
         c1 = self.choices[self.player1.id]
         c2 = self.choices[self.player2.id]
 
@@ -240,26 +288,64 @@ class DuelRPSView(NexoraView):
         if c1 == c2:
             result = "🤝 It's a Draw!"
             self._color = WARNING_COLOR
+            self.scores["draws"] += 1
             commentary = random.choice(TIE_COMMENTARY)
+            await record_game(self.bot, self.player1.id, "rps", "draw")
+            await record_game(self.bot, self.player2.id, "rps", "draw")
         elif CHOICES[c1]["beats"] == c2:
             result = f"🏆 {self.player1.display_name} Wins!"
             self._color = SUCCESS_COLOR
+            self.scores[self.player1.id] += 1
             commentary = random.choice(DUEL_WIN_COMMENTARY)
+            await record_game(self.bot, self.player1.id, "rps", "win")
+            await record_game(self.bot, self.player2.id, "rps", "loss")
         else:
             result = f"🏆 {self.player2.display_name} Wins!"
             self._color = SUCCESS_COLOR
+            self.scores[self.player2.id] += 1
             commentary = random.choice(DUEL_WIN_COMMENTARY)
+            await record_game(self.bot, self.player2.id, "rps", "win")
+            await record_game(self.bot, self.player1.id, "rps", "loss")
+
+        score_line = (
+            f"Score: `{self.player1.display_name}` **{self.scores[self.player1.id]}**  |  "
+            f"`{self.player2.display_name}` **{self.scores[self.player2.id]}**  |  "
+            f"Draws **{self.scores['draws']}**"
+        )
 
         header = (
             f"# {result}\n"
             f"> {self.player1.mention} chose: {p1_info['emoji']} **{p1_info['label']}**\n"
             f"> {self.player2.mention} chose: {p2_info['emoji']} **{p2_info['label']}**\n\n"
-            f"> *\"{commentary}\"*"
+            f"> *\"{commentary}\"*\n"
+            f"-# {score_line}"
         )
         self.add_section(header)
         self.add_separator(discord.SeparatorSpacing.small)
-        self.add_row(DismissButton())
-        self.add_footer("Nexora Mini-Games · Duel completed")
+
+        btn_rematch = discord.ui.Button(label="Rematch", emoji="🔄", style=discord.ButtonStyle.success)
+        btn_rematch.callback = self._on_rematch
+        self.add_row(btn_rematch, DismissButton())
+        self.add_footer("Nexora Mini-Games · Click 'Rematch' to run another round!")
+
+    async def _on_rematch(self, interaction: discord.Interaction):
+        if not self.message and interaction.message:
+            self.message = interaction.message
+        if interaction.user.id not in (self.player1.id, self.player2.id):
+            return await interaction.response.send_message("❌ Only duel participants can trigger a rematch.", ephemeral=True)
+        self.choices = {}
+        self.is_finished = False
+        self._color = BRAND_COLOR
+        self._build()
+        await interaction.response.edit_message(view=self)
+        try:
+            other = self.player2 if interaction.user.id == self.player1.id else self.player1
+            await interaction.channel.send(
+                f"🔔 {other.mention}, {interaction.user.mention} called for a rematch! Lock in your moves!",
+                delete_after=10,
+            )
+        except Exception:
+            pass
 
 
 class RockPaperScissors(commands.Cog):
@@ -275,14 +361,18 @@ class RockPaperScissors(commands.Cog):
     @app_commands.describe(opponent="Member to duel against (leave blank to play against bot)")
     @commands.guild_only()
     async def rps(self, ctx: commands.Context, opponent: Optional[discord.Member] = None):
-        if opponent:
-            if opponent == ctx.author:
-                return await ctx.send("❌ You cannot duel yourself!", ephemeral=True)
-            if opponent.bot:
-                return await ctx.send("❌ You cannot duel a bot directly — use `/rps` without arguments to play vs Nexora.", ephemeral=True)
-
+        if opponent and opponent != ctx.author and not opponent.bot:
             view = DuelRPSView(self.bot, ctx.author, opponent)
-            await send_view(ctx, view)
+            msg = await send_view(ctx, view)
+            if msg and hasattr(view, "message"):
+                view.message = msg
+            try:
+                await ctx.channel.send(
+                    f"🔔 {opponent.mention}, you were challenged to Rock-Paper-Scissors by {ctx.author.mention}!",
+                    delete_after=12,
+                )
+            except Exception:
+                pass
         else:
             view = SoloRPSView(self.bot, ctx.author)
             await send_view(ctx, view)

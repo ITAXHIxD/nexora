@@ -1,7 +1,6 @@
 discord.py>=2.7.1
 aiohttp
-asyncio
-dotenv
+python-dotenv
 pillow
 psutil
-logging
+motor

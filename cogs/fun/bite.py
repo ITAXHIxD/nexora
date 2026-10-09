@@ -10,14 +10,13 @@ class Bite(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.hybrid_command(name="bite", description="Bite someone (softly, I hope).")
-    @app_commands.describe(user="Who do you want to bite?")
-    async def bite(self, ctx, user: Optional[discord.Member] = None):
-        target = user or ctx.author
+    @commands.command(name="bite", description="Bite someone (softly, I hope).")
+    async def bite(self, ctx, *users: discord.Member):
+        targets = list(users) if users else [ctx.author]
         
         await send_owo_action_embed(
             ctx,
-            target,
+            targets,
             "bite",
             text_template="**{author}** bites **{target}** softly… *chomp chomp* 🦷😳",
             self_template="**{author}** bites their own hand… okay buddy…",
