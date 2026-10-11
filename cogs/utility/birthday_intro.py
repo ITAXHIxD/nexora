@@ -679,36 +679,125 @@ class BirthdayIntro(commands.Cog):
 
     async def _process_birthdays(self):
         now = datetime.datetime.now(datetime.timezone.utc)
+        stats = {
+            "profiles": 0,
+            "due_today": 0,
+            "already_notified": 0,
+            "missing_guild": 0,
+            "missing_member": 0,
+            "missing_channel": 0,
+            "announced": 0,
+            "failed_send": 0,
+        }
+
         async for doc in self.iter_birthdays():
-            if not is_today(doc["month"], doc["day"]):
+            stats["profiles"] += 1
+            if int(doc["month"]) != now.month or int(doc["day"]) != now.day:
                 continue
-            if doc.get("last_notified_year") == now.year:
+            stats["due_today"] += 1
+
+            try:
+                already_notified = int(doc.get("last_notified_year") or 0) == now.year
+            except (TypeError, ValueError):
+                already_notified = False
+            if already_notified:
+                stats["already_notified"] += 1
                 continue
 
-            guild = self.bot.get_guild(doc.get("guild_id", 0))
-            if not guild:
+            guild_id = int(doc.get("guild_id") or 0)
+            guild = self.bot.get_guild(guild_id)
+            if guild is None:
+                stats["missing_guild"] += 1
+                logger.warning(
+                    "Birthday due for user %s, but guild %s is not available in the bot cache",
+                    doc["_id"], guild_id,
+                )
                 continue
+
+            # get_member() only checks cache. Fetch from Discord when the
+            # member cache doesn't contain this user, especially after startup.
             member = guild.get_member(doc["_id"])
-            if not member:
-                continue
+            if member is None:
+                try:
+                    member = await guild.fetch_member(doc["_id"])
+                except discord.NotFound:
+                    stats["missing_member"] += 1
+                    logger.warning(
+                        "Birthday due for user %s in guild %s, but member was not found",
+                        doc["_id"], guild.id,
+                    )
+                    continue
+                except (discord.Forbidden, discord.HTTPException) as exc:
+                    stats["missing_member"] += 1
+                    logger.warning(
+                        "Could not fetch birthday member %s in guild %s: %s",
+                        doc["_id"], guild.id, exc,
+                    )
+                    continue
+
             settings = await self.get_settings(guild.id)
-            channel = guild.get_channel(settings.get("announce_channel_id", 0))
-            if not channel:
+            channel_id = settings.get("announce_channel_id")
+            if not channel_id:
+                stats["missing_channel"] += 1
+                logger.warning(
+                    "Birthday due for user %s in guild %s, but no announcement channel is configured; "
+                    "run /introbdsetup",
+                    doc["_id"], guild.id,
+                )
                 continue
 
-            role = guild.get_role(settings.get("announce_role_id", 0))
+            try:
+                channel_id = int(channel_id)
+            except (TypeError, ValueError):
+                stats["missing_channel"] += 1
+                logger.warning(
+                    "Birthday announcement channel ID %r is invalid in guild %s; run /introbdsetup",
+                    channel_id, guild.id,
+                )
+                continue
+
+            channel = guild.get_channel(channel_id)
+            if channel is None:
+                try:
+                    channel = await guild.fetch_channel(channel_id)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException) as exc:
+                    stats["missing_channel"] += 1
+                    logger.warning(
+                        "Could not resolve birthday announcement channel %s in guild %s: %s",
+                        channel_id, guild.id, exc,
+                    )
+                    continue
+
+            role_id = settings.get("announce_role_id")
+            try:
+                role = guild.get_role(int(role_id)) if role_id else None
+            except (TypeError, ValueError):
+                role = None
             if role:
                 try:
                     await member.add_roles(role, reason="Birthday")
                     asyncio.create_task(self._drop_role(member, role))
                 except discord.Forbidden:
-                    pass
+                    logger.warning(
+                        "Missing permission to grant birthday role %s in guild %s",
+                        role.id, guild.id,
+                    )
+                except discord.HTTPException as exc:
+                    logger.warning(
+                        "Could not grant birthday role %s in guild %s: %s",
+                        role.id, guild.id, exc,
+                    )
 
             display = doc.get("name") or member.display_name
             age_line, pronoun_line = "", ""
             if doc.get("year"):
-                age = now.year - doc["year"] - ((now.month, now.day) < (doc["month"], doc["day"]))
-                age_line = f"\nTurning **{ordinal(age)}** today! {STAR}"
+                try:
+                    age = now.year - int(doc["year"]) - (
+                        (now.month, now.day) < (int(doc["month"]), int(doc["day"]))
+                    )
+                    age_line = f"\nTurning **{ordinal(age)}** today! {STAR}"
+                except (TypeError, ValueError):
+                    logger.warning("Invalid birth year for user %s; omitting age", doc["_id"])
             if doc.get("pronouns"):
                 pronoun_line = f"\n*({doc['pronouns']})*"
 
@@ -721,15 +810,6 @@ class BirthdayIntro(commands.Cog):
                 rendered = f"{PARTY} It's {member.mention}'s birthday today! Wish them well! {CAKE}"
             desc = rendered + age_line + pronoun_line + "\n\n*Click below to send a wish!*"
 
-            embed = discord.Embed(
-                title=f"{CAKE} Happy Birthday, {display}! {CAKE}",
-                description=desc,
-                color=PREMIUM_COLOR if is_prem else TODAY_COLOR,
-                timestamp=now,
-            )
-            embed.set_thumbnail(url=member.display_avatar.url)
-            embed.set_footer(text=f"{guild.name} • Birthday System")
-
             try:
                 await send_ui(
                     channel,
@@ -739,15 +819,14 @@ class BirthdayIntro(commands.Cog):
                         guild_id=guild.id,
                         title=f"{CAKE} Happy Birthday, {display}! {CAKE}",
                         description=desc,
-                        color=TODAY_COLOR,
+                        color=PREMIUM_COLOR if is_prem else TODAY_COLOR,
                     ),
                 )
             except discord.HTTPException as exc:
+                stats["failed_send"] += 1
                 logger.warning(
-                    "Birthday announcement failed for user %s in guild %s: %s",
-                    doc["_id"],
-                    guild.id,
-                    exc,
+                    "Birthday announcement failed for user %s in guild %s, channel %s: %s",
+                    doc["_id"], guild.id, channel_id, exc,
                 )
                 # Do not mark this year as notified; a later check can retry.
                 continue
@@ -757,28 +836,51 @@ class BirthdayIntro(commands.Cog):
             await self.upsert_user(
                 doc["_id"], guild.id, {"last_notified_year": now.year}
             )
+            stats["announced"] += 1
 
             if doc.get("scope") == "mutual" and await self.is_premium(guild.id):
-                for og in self.bot.guilds:
-                    if og.id == guild.id:
+                for other_guild in self.bot.guilds:
+                    if other_guild.id == guild.id:
                         continue
-                    om = og.get_member(doc["_id"])
-                    if not om:
-                        continue
-                    os_ = await self.get_settings(og.id)
-                    och = og.get_channel(os_.get("announce_channel_id", 0))
-                    if not och:
+                    other_member = other_guild.get_member(doc["_id"])
+                    if other_member is None:
+                        try:
+                            other_member = await other_guild.fetch_member(doc["_id"])
+                        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                            continue
+                    other_settings = await self.get_settings(other_guild.id)
+                    other_channel_id = other_settings.get("announce_channel_id")
+                    if not other_channel_id:
                         continue
                     try:
-                        ce = discord.Embed(
-                            title=f"{CAKE} Happy Birthday, {display}! {CAKE}",
-                            description=desc, color=PREMIUM_COLOR, timestamp=now,
+                        other_channel_id = int(other_channel_id)
+                        other_channel = other_guild.get_channel(other_channel_id)
+                        if other_channel is None:
+                            other_channel = await other_guild.fetch_channel(other_channel_id)
+                        await send_ui(
+                            other_channel,
+                            view=WishView(
+                                self,
+                                uid=doc["_id"],
+                                guild_id=guild.id,
+                                title=f"{CAKE} Happy Birthday, {display}! {CAKE}",
+                                description=desc,
+                                color=PREMIUM_COLOR,
+                            ),
                         )
-                        ce.set_thumbnail(url=member.display_avatar.url)
-                        ce.set_footer(text=f"Cross-server • {CROWN} Premium")
-                        await send_ui(och, view=WishView(self, uid=doc["_id"], guild_id=guild.id, title=f"{CAKE} Happy Birthday, {display}! {CAKE}", description=desc, color=PREMIUM_COLOR))
-                    except discord.Forbidden:
-                        pass
+                    except (TypeError, ValueError, discord.NotFound, discord.Forbidden, discord.HTTPException) as exc:
+                        logger.warning(
+                            "Cross-server birthday announcement failed for user %s in guild %s: %s",
+                            doc["_id"], other_guild.id, exc,
+                        )
+
+        logger.info(
+            "Birthday check summary: scanned=%(profiles)s, due_today=%(due_today)s, "
+            "already_notified=%(already_notified)s, announced=%(announced)s, "
+            "missing_guild=%(missing_guild)s, missing_member=%(missing_member)s, "
+            "missing_channel=%(missing_channel)s, failed_send=%(failed_send)s",
+            stats,
+        )
 
     @daily_check.before_loop
     async def _before(self):
