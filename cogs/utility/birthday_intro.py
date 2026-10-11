@@ -576,6 +576,10 @@ BIRTHDAY_WISH_PRESETS = {
 }
 
 
+DEFAULT_BIRTHDAY_EMBED_TEXT = f"{PARTY} It's {{mention}}'s birthday today! Wish them well! {CAKE}"
+DEFAULT_BIRTHDAY_MESSAGE_TEXT = f"{PARTY} Help us celebrate {{mention}} today! Drop a birthday wish below! {CAKE}"
+
+
 class BirthdayWishPickerView(discord.ui.View):
     """Ephemeral wish-type picker shown when the birthday button is clicked."""
 
@@ -681,7 +685,7 @@ class BirthdayCustomWishModal(discord.ui.Modal, title="Write a Birthday Wish"):
 
 
 class BirthdayWishSetupView(discord.ui.View):
-    """Private menu to set the format and text of your own birthday announcement."""
+    """Private settings menu for the format and separate normal/embed announcement text."""
 
     def __init__(
         self,
@@ -693,6 +697,7 @@ class BirthdayWishSetupView(discord.ui.View):
         *,
         announcement_style: str = "both",
         custom_wish: Optional[str] = None,
+        custom_message: Optional[str] = None,
         timeout=180,
     ):
         super().__init__(timeout=timeout)
@@ -703,6 +708,7 @@ class BirthdayWishSetupView(discord.ui.View):
         self.display_name = display_name
         self.announcement_style = announcement_style if announcement_style in {"embed", "message", "both"} else "both"
         self.custom_wish = custom_wish
+        self.custom_message = custom_message
         self.message_style = self._get_message_style(custom_wish)
         self.add_item(BirthdayAnnouncementFormatSelect(self))
         self.add_item(BirthdayWishSetupSelect(self))
@@ -725,17 +731,22 @@ class BirthdayWishSetupView(discord.ui.View):
 
     def message_label(self) -> str:
         if self.message_style == "default":
-            return "Default Nexora birthday message"
+            return "Default birthday card text"
         if self.message_style == "custom":
-            return "Your custom message"
+            return "Custom birthday card text"
         return BIRTHDAY_WISH_PRESETS[self.message_style][0]
+
+    def normal_message_label(self) -> str:
+        return "Custom normal message" if self.custom_message else "Default celebratory message"
 
     def summary(self) -> str:
         return (
             "# 🎂 Birthday Announcement Settings\n\n"
             f"**Format:** {self.format_label()}\n"
-            f"**Wish text:** {self.message_label()}\n\n"
-            "Choose a format and a wish style below. These settings are saved for your birthday announcements."
+            f"**Normal message:** {self.normal_message_label()}\n"
+            f"**Embed card text:** {self.message_label()}\n\n"
+            "Choose a format, select an embed text style, or use **Customize message + embed** "
+            "to edit the two texts separately. These settings are saved for your birthday announcements."
         )
 
     def refreshed(self):
@@ -747,7 +758,29 @@ class BirthdayWishSetupView(discord.ui.View):
             self.display_name,
             announcement_style=self.announcement_style,
             custom_wish=self.custom_wish,
+            custom_message=self.custom_message,
             timeout=self.timeout,
+        )
+
+    @discord.ui.button(
+        label="Customize message + embed",
+        style=discord.ButtonStyle.primary,
+        emoji="📝",
+        row=2,
+    )
+    async def customize_birthday_texts(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        await interaction.response.send_modal(
+            BirthdayAnnouncementTextsModal(
+                self.cog,
+                self.user_id,
+                self.guild_id,
+                self.user_mention,
+                self.display_name,
+                custom_message=self.custom_message,
+                custom_wish=self.custom_wish,
+            )
         )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -761,6 +794,79 @@ class BirthdayWishSetupView(discord.ui.View):
     async def on_timeout(self):
         for item in self.children:
             item.disabled = True
+
+
+class BirthdayAnnouncementTextsModal(discord.ui.Modal, title="Customize Birthday Texts"):
+    """Edit the normal message and embed card description independently."""
+
+    def __init__(
+        self,
+        cog,
+        user_id: int,
+        guild_id: int,
+        user_mention: str,
+        display_name: str,
+        *,
+        custom_message: Optional[str] = None,
+        custom_wish: Optional[str] = None,
+    ):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.user_id = user_id
+        self.guild_id = guild_id
+        self.user_mention = user_mention
+        self.display_name = display_name
+        self.normal_text = discord.ui.TextInput(
+            label="Normal message text",
+            placeholder="Use {mention} and/or {name}; shown outside the embed",
+            default=custom_message or DEFAULT_BIRTHDAY_MESSAGE_TEXT,
+            style=discord.TextStyle.paragraph,
+            min_length=0,
+            max_length=1500,
+            required=False,
+        )
+        self.embed_text = discord.ui.TextInput(
+            label="Embed card text",
+            placeholder="Use {mention} and/or {name}; shown inside the embed",
+            default=custom_wish or DEFAULT_BIRTHDAY_EMBED_TEXT,
+            style=discord.TextStyle.paragraph,
+            min_length=0,
+            max_length=3000,
+            required=False,
+        )
+        self.add_item(self.normal_text)
+        self.add_item(self.embed_text)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        normal_raw = str(self.normal_text.value).strip() or None
+        embed_raw = str(self.embed_text.value).strip() or None
+        normal_template = normal_raw or DEFAULT_BIRTHDAY_MESSAGE_TEXT
+        embed_template = embed_raw or DEFAULT_BIRTHDAY_EMBED_TEXT
+
+        try:
+            normal_preview = normal_template.format(
+                mention=self.user_mention, name=self.display_name
+            )
+            embed_preview = embed_template.format(
+                mention=self.user_mention, name=self.display_name
+            )
+        except (IndexError, KeyError, ValueError):
+            return await interaction.response.send_message(
+                "Use only the {mention} and {name} placeholders.",
+                ephemeral=True,
+            )
+
+        await self.cog.upsert_user(
+            self.user_id,
+            self.guild_id,
+            {"custom_message": normal_raw, "custom_wish": embed_raw},
+        )
+        await interaction.response.send_message(
+            "✅ **Birthday announcement texts saved!**\n\n"
+            f"**Normal message preview:**\n{normal_preview}\n\n"
+            f"**Embed card preview:**\n{embed_preview}",
+            ephemeral=True,
+        )
 
 
 class BirthdayAnnouncementFormatSelect(discord.ui.Select):
@@ -806,9 +912,9 @@ class BirthdayWishSetupSelect(discord.ui.Select):
         self.setup_view = setup_view
         options = [
             discord.SelectOption(
-                label="Default Nexora message",
+                label="Default embed card text",
                 value="default",
-                description="Use Nexora's standard birthday wording",
+                description="Use Nexora's standard birthday-card wording",
                 emoji="🎂",
                 default=setup_view.message_style == "default",
             )
@@ -841,7 +947,7 @@ class BirthdayWishSetupSelect(discord.ui.Select):
             )
         )
         super().__init__(
-            placeholder="Choose birthday wish text…",
+            placeholder="Choose embed card text style…",
             min_values=1,
             max_values=1,
             options=options,
@@ -1366,13 +1472,20 @@ class BirthdayIntro(commands.Cog):
                 pronoun_line = f"\n*({doc['pronouns']})*"
 
             is_prem = await self.is_premium(guild.id)
-            template = doc.get("custom_wish") or f"{PARTY} It's {{mention}}'s birthday today! Wish them well! {CAKE}"
+            template = doc.get("custom_wish") or DEFAULT_BIRTHDAY_EMBED_TEXT
             try:
                 rendered = template.format(mention=member.mention, name=display)
             except (IndexError, KeyError, ValueError) as exc:
-                logger.warning("Invalid custom birthday template for %s: %s", doc["_id"], exc)
-                rendered = f"{PARTY} It's {member.mention}'s birthday today! Wish them well! {CAKE}"
+                logger.warning("Invalid custom embed birthday template for %s: %s", doc["_id"], exc)
+                rendered = DEFAULT_BIRTHDAY_EMBED_TEXT.format(mention=member.mention, name=display)
             desc = rendered + age_line + pronoun_line + "\n\n*Click below to send a wish!*"
+
+            normal_template = doc.get("custom_message") or DEFAULT_BIRTHDAY_MESSAGE_TEXT
+            try:
+                normal_rendered = normal_template.format(mention=member.mention, name=display)
+            except (IndexError, KeyError, ValueError) as exc:
+                logger.warning("Invalid custom normal birthday template for %s: %s", doc["_id"], exc)
+                normal_rendered = DEFAULT_BIRTHDAY_MESSAGE_TEXT.format(mention=member.mention, name=display)
             announcement_style = doc.get("announcement_style", "both")
             if announcement_style not in {"embed", "message", "both"}:
                 announcement_style = "both"
@@ -1389,7 +1502,7 @@ class BirthdayIntro(commands.Cog):
             embed.set_thumbnail(url=member.display_avatar.url)
             embed.set_footer(text=f"{guild.name} • Birthday System")
 
-            normal_body = rendered + age_line + pronoun_line + "\n\nUse the buttons below to send a birthday wish!"
+            normal_body = normal_rendered + "\n\nUse the buttons below to send a birthday wish!"
             required_pings = []
             if member.mention not in normal_body:
                 required_pings.append(member.mention)
@@ -1484,7 +1597,20 @@ class BirthdayIntro(commands.Cog):
                         )
                         cross_embed.set_thumbnail(url=other_member.display_avatar.url)
                         cross_embed.set_footer(text=f"{other_guild.name} • Birthday System • Premium")
-                        cross_body = rendered + age_line + pronoun_line + "\n\nUse the buttons below to send a birthday wish!"
+                        cross_normal_template = doc.get("custom_message") or DEFAULT_BIRTHDAY_MESSAGE_TEXT
+                        try:
+                            cross_normal_rendered = cross_normal_template.format(
+                                mention=other_member.mention, name=display
+                            )
+                        except (IndexError, KeyError, ValueError) as exc:
+                            logger.warning(
+                                "Invalid cross-server normal birthday template for user %s: %s",
+                                doc["_id"], exc,
+                            )
+                            cross_normal_rendered = DEFAULT_BIRTHDAY_MESSAGE_TEXT.format(
+                                mention=other_member.mention, name=display
+                            )
+                        cross_body = cross_normal_rendered + "\n\nUse the buttons below to send a birthday wish!"
                         cross_required_pings = []
                         if other_member.mention not in cross_body:
                             cross_required_pings.append(other_member.mention)
@@ -2008,7 +2134,7 @@ class BirthdayIntro(commands.Cog):
     @app_commands.describe(message="Optional custom message. Leave blank to open the settings menu.")
     @commands.guild_only()
     async def birthdaywish(self, ctx: commands.Context, *, message: Optional[str] = None):
-        """FREE — Choose embed/message format and save a birthday wish."""
+        """FREE — Choose format and customize birthday announcement text."""
         if message is None or not message.strip():
             profile = await self.get_user(ctx.author.id, ctx.guild.id) or {}
             view = BirthdayWishSetupView(
@@ -2019,6 +2145,7 @@ class BirthdayIntro(commands.Cog):
                 ctx.author.display_name,
                 announcement_style=profile.get("announcement_style", "both"),
                 custom_wish=profile.get("custom_wish"),
+                custom_message=profile.get("custom_message"),
             )
             content = view.summary()
             if ctx.interaction is not None:
@@ -2040,9 +2167,9 @@ class BirthdayIntro(commands.Cog):
                 "Use only {mention} and {name} placeholders in birthday wishes.", ctx=ctx
             ), ephemeral=True)
         await self.upsert_user(ctx.author.id, ctx.guild.id, {"custom_wish": message})
-        embed = success_embed("Custom Wish Saved!", f"**Preview:**\n{preview}", ctx=ctx)
-        embed.title = f"{SPARKLE} Custom Wish Saved!"
-        embed.set_footer(text="This will appear in your birthday announcement")
+        embed = success_embed("Custom Embed Text Saved!", f"**Embed preview:**\n{preview}", ctx=ctx)
+        embed.title = f"{SPARKLE} Custom Embed Text Saved!"
+        embed.set_footer(text="Use /birthdaywish without text to customize both announcement fields")
         await send_ui(ctx, embed=embed, ephemeral=True)
 
     @commands.hybrid_command(name="birthdayscope", description="Premium — Choose where your birthday gets announced")
