@@ -1549,7 +1549,21 @@ class BirthdayIntro(commands.Cog):
         )
         if data.get("pronouns"):
             embed.add_field(name="🏳️‍🌈 Pronouns", value=data["pronouns"], inline=True)
-        await send_ui(ctx, embed=embed if not today else None, view=WishView(self, uid=target.id, guild_id=ctx.guild.id, title=embed.title, description=embed.description, color=TODAY_COLOR) if today else None)
+
+        if not today:
+            return await send_ui(ctx, embed=embed)
+
+        # Birthday-today cards use a classic embed plus a normal View so the
+        # Send Birthday Wish button opens the interactive wish-type picker.
+        view = BirthdayAnnouncementView(self, uid=target.id, guild_id=ctx.guild.id)
+        interaction = ctx.interaction
+        if interaction is not None:
+            if interaction.response.is_done():
+                await interaction.followup.send(embed=embed, view=view)
+            else:
+                await interaction.response.send_message(embed=embed, view=view)
+        else:
+            await ctx.send(embed=embed, view=view)
 
     @commands.hybrid_command(name="birthdaylist", description="View upcoming birthdays in this server")
     @app_commands.describe(limit="How many to show (max 25)")
