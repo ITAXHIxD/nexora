@@ -219,7 +219,7 @@ class StatusDashboardView(NexoraView):
             presence_text = (
                 "### 🎭 Dynamic Status Engine\n"
                 f"• **Current Status:** 🟢 `Online`\n"
-                f"• **Activity Cycle:** Every `30 seconds`\n"
+                f"• **Activity Cycle:** Every `5 minutes`\n"
                 f"• **Activity Pool:** `50+` Creative, Gaming, Anime, and Music presences\n"
                 f"• **Prefixes:** Default `n!` or customizable per-guild + Slash `/commands`\n"
                 f"• **Components Version:** Discord UI Kit V2 Container & MediaGallery"
