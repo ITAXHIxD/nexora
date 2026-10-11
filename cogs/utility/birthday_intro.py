@@ -2045,7 +2045,7 @@ class BirthdayIntro(commands.Cog):
         embed.set_footer(text="This will appear in your birthday announcement")
         await send_ui(ctx, embed=embed, ephemeral=True)
 
-    @commands.hybrid_command(name="birthdayscope"    @commands.hybrid_command(name="birthdayscope", description="Premium — Choose where your birthday gets announced")
+    @commands.hybrid_command(name="birthdayscope", description="Premium — Choose where your birthday gets announced")
     @app_commands.describe(scope="server = this server only | mutual = all mutual servers with the bot")
     @app_commands.choices(scope=[
         app_commands.Choice(name="This server only", value="server"),
