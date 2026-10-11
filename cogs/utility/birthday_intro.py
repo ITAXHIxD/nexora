@@ -909,7 +909,7 @@ class BirthdayIntro(commands.Cog):
                     "Birthday announcement failed for user %s in guild %s, channel %s: %s",
                     doc["_id"], guild.id, channel_id, exc,
                 )
-                # Do not mark this year as notified; a later check can retry.
+                # No daily ledger entry was written, so the next check can retry.
                 continue
 
             # Mark only after Discord accepted the announcement. The ledger is
