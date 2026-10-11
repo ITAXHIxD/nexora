@@ -92,6 +92,60 @@ COMMAND_DATA = {
         "related": ["birthdayhelp", "birthdaywish"],
     },
 
+    # ── BOT STATUS & TELEMETRY ─────────────────────────────────────────────────
+    "status": {
+        "name": "status",
+        "aliases": ["stats", "botstatus", "cluster"],
+        "category": "info",
+        "premium": False,
+        "admin": False,
+        "description": "Open the interactive live status dashboard for hardware, network, games, and activity telemetry",
+        "usage": [
+            "n!status",
+            "n!stats",
+            "n!botstatus",
+            "n!cluster",
+            "/status",
+        ],
+        "examples": [
+            "n!status",
+            "/status",
+        ],
+        "notes": [
+            "Four interactive tabs: **Hardware**, **Network**, **Games & Fun**, and **Activities**",
+            "Hardware shows CPU load, system RAM, bot-process memory, worker threads, platform, Python, and discord.py version",
+            "Network shows server/member/channel counts, gateway latency, messages processed, commands executed, and recorded incidents",
+            "Games & Fun shows supported games, recorded match totals, currently AFK members, and multiplayer/party activity",
+            "Activities shows the bot's presence mode, activity pool, prefixes, and Components V2 information",
+            "Use the tab buttons to switch views; **Refresh** updates the dashboard and **Dismiss** closes it",
+            "Prefix aliases: `n!stats`, `n!botstatus`, and `n!cluster`. The slash command is `/status`",
+        ],
+        "related": ["ping", "botinfo", "gamesstats", "premium"],
+    },
+    "ping": {
+        "name": "ping",
+        "aliases": [],
+        "category": "info",
+        "premium": False,
+        "admin": False,
+        "description": "Check Nexora's gateway latency and WebSocket heartbeat",
+        "usage": [
+            "n!ping",
+            "/ping",
+        ],
+        "examples": [
+            "n!ping",
+            "/ping",
+        ],
+        "notes": [
+            "Displays the current WebSocket gateway ping in milliseconds with a latency badge and meter",
+            "Shows gateway connection state and the active shard indicator",
+            "Use **Re-ping** to refresh the latency reading",
+            "Use `/status` for the full hardware, network, games, and presence dashboard",
+        ],
+        "related": ["status", "botinfo"],
+    },
+
     # ── BIRTHDAY ──────────────────────────────────────────────────────────────
     "setbirthday": {
         "name": "setbirthday",
@@ -596,7 +650,7 @@ COMMAND_DATA = {
         "category": "fun",
         "premium": False,
         "admin": False,
-        "description": "Play interactive Truth or Dare solo or challenge a friend",
+        "description": "Play the combined interactive Truth or Dare game solo or challenge a friend",
         "usage": [
             "n!tod [target] [rating]",
             "/tod [target] [rating]",
@@ -608,11 +662,62 @@ COMMAND_DATA = {
             "/tod rating:pg",
         ],
         "notes": [
-            "Tiers: `pg` (family friendly), `teen` (secrets & party), `spicy` (wild dares & chaos)",
-            "Interactive buttons: 💬 Truth, ⚡ Dare, 🎲 Random, 🔄 Reroll",
-            "PvP mode: Target player can claim ✅ Completed (+1000 Aura) or 🐔 Chicken Out with funny forfeit penalty!",
+            "Use `/truth` or `/dare` to start with only one type of prompt, or use this combined command",
+            "Content tiers: `pg` (Warm-Up), `teen` (Chaos), and `spicy` (bold/flirty); the default tier is `teen`",
+            "Interactive controls include Truth, Dare, Random, and Reroll, so you can keep the session going",
+            "Play solo or challenge a friend; multiplayer challenges include response/forfeit controls",
         ],
-        "related": ["wyr", "meme", "rps"],
+        "related": ["truth", "dare", "wyr", "meme", "rps"],
+    },
+    "truth": {
+        "name": "truth",
+        "aliases": [],
+        "category": "fun",
+        "premium": False,
+        "admin": False,
+        "description": "Start Truth or Dare with a truth prompt only, solo or against a friend",
+        "usage": [
+            "n!truth [target] [rating]",
+            "/truth [target] [rating]",
+        ],
+        "examples": [
+            "n!truth",
+            "n!truth @Alex spicy",
+            "/truth",
+            "/truth target:@Alex rating:spicy",
+        ],
+        "notes": [
+            "Starts the session with a Truth prompt; use the in-game controls to keep playing",
+            "Content tiers: `pg` (Warm-Up), `teen` (Chaos), and `spicy` (bold truth prompts); default is `teen`",
+            "Leave `target` empty to play solo, or select a member to challenge",
+            "Available as both a prefix command and a slash command",
+        ],
+        "related": ["tod", "dare", "wyr"],
+    },
+    "dare": {
+        "name": "dare",
+        "aliases": [],
+        "category": "fun",
+        "premium": False,
+        "admin": False,
+        "description": "Start Truth or Dare with a dare prompt only, solo or against a friend",
+        "usage": [
+            "n!dare [target] [rating]",
+            "/dare [target] [rating]",
+        ],
+        "examples": [
+            "n!dare",
+            "n!dare @Alex spicy",
+            "/dare",
+            "/dare target:@Alex rating:spicy",
+        ],
+        "notes": [
+            "Starts the session with a Dare prompt; use the in-game controls to keep playing",
+            "Content tiers: `pg` (Warm-Up), `teen` (Chaos), and `spicy` (bold/flirty dares); default is `teen`",
+            "Leave `target` empty to play solo, or select a member to challenge",
+            "Available as both a prefix command and a slash command",
+        ],
+        "related": ["tod", "truth", "wyr"],
     },
     "wyr": {
         "name": "wyr",
@@ -1750,13 +1855,16 @@ class HelpMainView(HelpLayoutView):
 
         whats_new = (
             "## ✨ What's New & Highlights\n"
-            "• 👑 **MongoDB Atlas Cloud Sync:** Cross-server real-time persistence for premium, warnings, reminders, and confessions.\n"
-            "• 🎭 **Vanity Roles Engine:** Automatic role grants synced to custom status keyword triggers with slot tiers (`/vanity`, `n!vanity_add`).\n"
-            "• 🎂 **Birthday Announcements & Intros:** Automated birthday alerts, member profiles, age calculation, and celebration roles (`/setbirthday`, `/birthday`).\n"
-            "• 🛡️ **Advanced Moderation & Logs:** Bans, kicks, mutes, tempbans, warnings, lockdowns, snipes, and auto-detecting audit log channels (`/ban`, `/mute`, `/serverlogs`).\n"
-            "• 🎲 **Social Games & Duels:** 3x3 Tic-Tac-Toe, Rock-Paper-Scissors, Ship love compatibility, Truth or Dare, and Would You Rather.\n"
+            "• 📊 **Live Status & Telemetry:** Hardware and RAM metrics, network scale, gateway latency, game activity, and live presence tabs (`/status`, `/ping`).\n"
+            "• 🎭 **Truth & Dare Upgrade:** Separate `/truth` and `/dare` commands, plus classic `/tod`, with tougher prompts and Warm-Up, Chaos, and Spicy tiers.\n"
+            "• 🎮 **Multiplayer Game Updates:** Turn-based game alerts and match activity are surfaced in the Games & Fun section of the status dashboard.\n"
+            "• 🎂 **Birthday Customization:** Automated birthday alerts and profiles, with separate editable normal-message and embed-card text (`/birthdaywish`).\n"
+            "• 👑 **Vanity Roles Engine:** Automatic role grants synced to custom status keyword triggers with slot tiers (`/vanity`, `n!vanity_add`).\n"
+            "• 🛡️ **Advanced Moderation & Logs:** Bans, kicks, mutes, tempbans, warnings, lockdowns, snipes, and audit log channels (`/ban`, `/mute`, `/serverlogs`).\n"
+            "• 🎲 **Social Games & Duels:** Tic-Tac-Toe, Rock-Paper-Scissors, Connect Four, Number Guess, Ship, and Would You Rather.\n"
             "• 🧸 **13 Animated Action Commands:** Prefix-only expressions with anime reaction gifs (`n!pat`, `n!cuddle`, `n!hug`, `n!kiss`, `n!slap`, `n!punch`, etc.).\n"
-            "• ⚡ **Optimized Command Engine:** Strict adherence to Discord's 100 global slash command ceiling with seamless hybrid fallback."
+            "• 👑 **MongoDB Atlas Cloud Sync:** Cross-server persistence for premium, warnings, reminders, and confessions.\n"
+            "• ⚡ **Optimized Command Engine:** Hybrid prefix/slash commands with dynamic Help indexing for newly loaded commands."
         )
         self.add_text(whats_new)
         self.add_separator()
