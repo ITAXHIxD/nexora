@@ -251,6 +251,9 @@ class ModConfirmLayoutView(NexoraView):
         self.add_row(btn_confirm, btn_cancel)
 
     async def _on_confirm(self, interaction: discord.Interaction):
+        # Defer the component interaction immediately. The command handler
+        # edits this same message with the result card after the action completes.
+        await interaction.response.defer()
         self.confirmed = True
         self.stop()
 
