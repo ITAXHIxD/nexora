@@ -648,32 +648,19 @@ class AFK(commands.Cog):
                     pass
 
         if alert_lines:
-            embed = discord.Embed(
-                title="💤 Member AFK Notice",
-                description="\n\n".join(alert_lines),
-                color=BRAND_COLOR,
-                timestamp=now_dt,
-            )
-            embed.set_footer(text=f"Alert for @{message.author.display_name} · Nexora AFK Network")
+            # Reply directly to the message that mentioned the AFK member(s).
+            # This is an ordinary text message, not an embed; suppress pings so
+            # repeating the AFK notice doesn't notify the mentioned members again.
+            reply_text = "💤 **AFK Notice**\n\n" + "\n\n".join(alert_lines)
             try:
-                await message.channel.send(
-                    embed=embed,
-                    reference=message.to_reference(fail_if_not_exists=False),
+                await message.reply(
+                    reply_text,
+                    mention_author=False,
                     allowed_mentions=discord.AllowedMentions.none(),
+                    fail_if_not_exists=False,
                 )
             except Exception as e:
-                # Keep the AFK reply useful even if embeds are blocked by channel
-                # permissions or Discord rejects the embed payload.
-                logger.warning("AFK embed alert failed; trying plain-text fallback: %s", e)
-                fallback_text = "💤 **Member AFK Notice**\n\n" + "\n\n".join(alert_lines)
-                try:
-                    await message.channel.send(
-                        fallback_text,
-                        reference=message.to_reference(fail_if_not_exists=False),
-                        allowed_mentions=discord.AllowedMentions.none(),
-                    )
-                except Exception as fallback_error:
-                    logger.warning("AFK plain-text alert failed: %s", fallback_error)
+                logger.warning("AFK text-reply failed: %s", e)
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
