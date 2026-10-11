@@ -257,17 +257,61 @@ class V2CardView(BirthdayLayoutView):
 
 
 async def send_ui(destination, *, embed=None, view=None, ephemeral=False, **kwargs):
-    """Send Components V2 where supported, with legacy fallback for old discord.py."""
-    if HAS_COMPONENTS_V2:
-        if view is None:
-            view = V2CardView(embed) if embed is not None else None
-        elif embed is not None and hasattr(view, "set_card"):
-            view.set_card(embed)
-        # Components V2 messages cannot include legacy content/embeds.
-        kwargs.pop("content", None)
-        kwargs.pop("embed", None)
-        kwargs.pop("embeds", None)
-        return await destination.send(view=view, ephemeral=ephemeral, **kwargs)
+    """Send a Components V2 card safely to interactions, command contexts, or channels."""
+    if view is None:
+        view = V2CardView(embed) if embed is not None else None
+    elif embed is not None and hasattr(view, "set_card"):
+        view.set_card(embed)
+
+    # Components V2 LayoutView messages cannot contain legacy content/embeds.
+    kwargs.pop("content", None)
+    kwargs.pop("embed", None)
+    kwargs.pop("embeds", None)
+
+    # Interaction responses/followups support ephemeral messages. A normal
+    # Messageable (text channel, member DM, or user DM) does not.
+    if isinstance(destination, discord.Interaction):
+        if destination.response.is_done():
+            message = await destination.followup.send(
+                view=view, ephemeral=ephemeral, **kwargs
+            )
+        else:
+            await destination.response.send_message(
+                view=view, ephemeral=ephemeral, **kwargs
+            )
+            try:
+                message = await destination.original_response()
+            except (discord.NotFound, discord.HTTPException):
+                message = None
+
+    elif isinstance(destination, commands.Context):
+        interaction = destination.interaction
+        if interaction is not None:
+            if interaction.response.is_done():
+                message = await interaction.followup.send(
+                    view=view, ephemeral=ephemeral, **kwargs
+                )
+            else:
+                await interaction.response.send_message(
+                    view=view, ephemeral=ephemeral, **kwargs
+                )
+                try:
+                    message = await interaction.original_response()
+                except (discord.NotFound, discord.HTTPException):
+                    message = None
+        else:
+            # Prefix commands cannot be ephemeral; send normally and don't
+            # pass the unsupported ephemeral keyword to Context.send().
+            message = await destination.send(view=view, **kwargs)
+
+    else:
+        # Channels and user/member DMs are regular Messageable destinations.
+        # Deliberately omit ephemeral here, including for scheduled broadcasts.
+        message = await destination.send(view=view, **kwargs)
+
+    if view is not None and message is not None and hasattr(view, "message"):
+        view.message = message
+    return message
 
 
 
