@@ -529,40 +529,43 @@ class AFK(commands.Cog):
         now_ts = time.time()
         now_dt = datetime.datetime.now(datetime.timezone.utc)
 
-        # 1. Check if the message author was AFK (O(1) in-memory check!)
+        # 1. Clear the author's AFK status on their first normal message.
+        # AFK commands themselves are excluded so users can inspect/change AFK
+        # settings without accidentally clearing their own status.
         if message.author.id in self.active_afk_cache:
-            # 5-second anti-instant-unafk grace period
-            set_ts = self._set_timestamps.get(message.author.id, 0)
-            if now_ts - set_ts >= 5.0:
-                content_lower = message.content.strip().lower()
-                is_afk_command = False
-                for pfx in ("n!", "/", "!"):
-                    if content_lower.startswith(tuple(f"{pfx}{c}" for c in ("afk", "unafk", "gafk"))):
-                        is_afk_command = True
-                        break
-                if self.bot.user and (f"<@{self.bot.user.id}>" in content_lower or f"<@!{self.bot.user.id}>" in content_lower):
-                    if any(f" {c}" in content_lower for c in ("afk", "unafk", "gafk")):
-                        is_afk_command = True
+            content_lower = message.content.strip().lower()
+            is_afk_command = False
+            for pfx in ("n!", "/", "!"):
+                if content_lower.startswith(tuple(f"{pfx}{c}" for c in ("afk", "unafk", "gafk"))):
+                    is_afk_command = True
+                    break
+            if self.bot.user and (
+                f"<@{self.bot.user.id}>" in content_lower
+                or f"<@!{self.bot.user.id}>" in content_lower
+            ):
+                if any(f" {c}" in content_lower for c in ("afk", "unafk", "gafk")):
+                    is_afk_command = True
 
-                if not is_afk_command:
-                    afk_data = await self.get_afk(message.author.id)
-                    if afk_data:
-                        # Only un-AFK if global OR if talking in the guild where AFK was set!
-                        if afk_data.get("global") or afk_data.get("guild_id") == message.guild.id:
-                            delta = now_dt - datetime.datetime.fromisoformat(afk_data["time"])
-                            duration = self.format_duration(delta)
-                            removed = await self.remove_afk_status(message.author, message.guild)
-                            if removed:
-                                view = NexoraView(color=SUCCESS_COLOR, timeout=60)
-                                mention_info = ""
-                                if removed.get("mentions"):
-                                    mention_info = f"\n• 📬 You were mentioned **{len(removed['mentions'])}** time(s) while away."
-                                view.add_text(
-                                    f"# 👋 Welcome back, {message.author.display_name}!\n"
-                                    f"> Your AFK status has been removed (Away for **{duration}**).{mention_info}"
-                                )
-                                view.add_footer("Nexora AFK Network")
-                                await message.channel.send(view=view)
+            if not is_afk_command:
+                afk_data = await self.get_afk(message.author.id)
+                if afk_data:
+                    # Server-only AFK clears only in the server where it was set;
+                    # global AFK clears from any server the member speaks in.
+                    if afk_data.get("global") or afk_data.get("guild_id") == message.guild.id:
+                        delta = now_dt - datetime.datetime.fromisoformat(afk_data["time"])
+                        duration = self.format_duration(delta)
+                        removed = await self.remove_afk_status(message.author, message.guild)
+                        if removed:
+                            view = NexoraView(color=SUCCESS_COLOR, timeout=60)
+                            mention_info = ""
+                            if removed.get("mentions"):
+                                mention_info = f"\n• 📬 You were mentioned **{len(removed['mentions'])}** time(s) while away."
+                            view.add_text(
+                                f"# 👋 Welcome back, {message.author.display_name}!\n"
+                                f"> Your AFK status has been removed (Away for **{duration}**).{mention_info}"
+                            )
+                            view.add_footer("Nexora AFK Network")
+                            await message.channel.send(view=view)
 
         # 2. Check if any mentioned users or reply reference target is AFK
         targets_to_check: list[discord.Member | discord.User] = []
@@ -659,7 +662,18 @@ class AFK(commands.Cog):
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
             except Exception as e:
-                logger.warning("AFK alert send failed: %s", e)
+                # Keep the AFK reply useful even if embeds are blocked by channel
+                # permissions or Discord rejects the embed payload.
+                logger.warning("AFK embed alert failed; trying plain-text fallback: %s", e)
+                fallback_text = "💤 **Member AFK Notice**\n\n" + "\n\n".join(alert_lines)
+                try:
+                    await message.channel.send(
+                        fallback_text,
+                        reference=message.to_reference(fail_if_not_exists=False),
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                except Exception as fallback_error:
+                    logger.warning("AFK plain-text alert failed: %s", fallback_error)
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
