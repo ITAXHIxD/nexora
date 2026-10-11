@@ -335,8 +335,9 @@ class TicTacToeView(NexoraView):
                     self.current_player = self.player_o if self.current_player == self.player_x else self.player_x
 
             self._build_board()
-            content = f"🔔 {self.current_player.mention}, it's your turn! (❌ vs ⭕)" if not self.is_solo and not self.winner and not self.is_draw else None
-            await interaction.response.edit_message(content=content, view=self)
+            # V2 messages cannot be edited with legacy message content.
+            # Turn alerts are sent as a separate temporary channel message below.
+            await interaction.response.edit_message(view=self)
 
             if not self.is_solo and not self.winner and not self.is_draw:
                 try:
@@ -362,8 +363,7 @@ class TicTacToeView(NexoraView):
         self.current_player = self.player_x
         self._color = BRAND_COLOR
         self._build_board()
-        content = f"🔔 {self.current_player.mention}, it's your turn! (❌ vs ⭕)" if not self.is_solo else None
-        await interaction.response.edit_message(content=content, view=self)
+        await interaction.response.edit_message(view=self)
 
         if not self.is_solo:
             try:
