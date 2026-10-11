@@ -331,10 +331,20 @@ class DismissButton(discord.ui.Button):
         if self.user_id and interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ Only the command invoker can dismiss this.", ephemeral=True)
             return
+        # Acknowledge the component interaction before deleting the message,
+        # otherwise Discord may display "This interaction failed".
         try:
-            await interaction.message.delete()
+            await interaction.response.defer()
+        except discord.InteractionResponded:
+            pass
+
+        try:
+            if interaction.message:
+                await interaction.message.delete()
         except Exception:
+            # Fallback: leave the card in place but remove its interactive controls.
             try:
-                await interaction.response.edit_message(view=None)
+                if interaction.message:
+                    await interaction.message.edit(view=None)
             except Exception:
                 pass
