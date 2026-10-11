@@ -1667,7 +1667,7 @@ class BirthdayIntro(commands.Cog):
                 "`/editbirthday <month> <day> [year]` — fix a wrong date\n"
                 "`/editprofile [name] [age] [pronouns]` — fix your parsed info\n"
                 "`/myprofile` — view everything saved about you\n"
-                "`/birthdaywish <message>` — personalise your announcement\n"
+                "`/birthdaywish [message]` — choose embed-only, message-only, both, or a custom wish\n"
                 "`/birthdaynotify <true|false>` — choose whether wishes send you a DM\n"
                 "`/scanintros [limit]` *(admin, up to 100)* — import recent intros"
             ),
