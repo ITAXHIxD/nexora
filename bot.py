@@ -415,7 +415,16 @@ class CharacterBot(commands.Bot):
 
         try:
             cmds = await self.tree.sync()
-            logger.info("⚡ App commands synced globally: %d commands", len(cmds))
+            synced_names = {cmd.name for cmd in cmds}
+            help_status = "registered" if "help" in synced_names else "MISSING"
+            logger.info(
+                "⚡ App commands synced globally: %d commands | /help: %s",
+                len(cmds), help_status,
+            )
+            if "help" not in synced_names:
+                logger.error(
+                    "/help was not present in the global sync response. Check that cogs.core.help loaded and registered its hybrid command."
+                )
         except Exception as e:
             logger.error("Global slash sync failed: %s", e)
 
@@ -423,8 +432,17 @@ class CharacterBot(commands.Bot):
         if test_guild_id:
             try:
                 guild = discord.Object(id=test_guild_id)
-                cmds  = await self.tree.sync(guild=guild)
-                logger.info("⚡ App commands synced to test guild %d: %d commands", test_guild_id, len(cmds))
+                # Copy global command definitions into the test guild so updates show there immediately.
+                self.tree.copy_global_to(guild=guild)
+                cmds = await self.tree.sync(guild=guild)
+                guild_names = {cmd.name for cmd in cmds}
+                help_status = "registered" if "help" in guild_names else "MISSING"
+                logger.info(
+                    "⚡ App commands synced to test guild %d: %d commands | /help: %s",
+                    test_guild_id, len(cmds), help_status,
+                )
+                if "help" not in guild_names:
+                    logger.error("/help was not present in the test-guild sync response.")
             except Exception as e:
                 logger.error("Guild sync failed (%d): %s", test_guild_id, e)
 
