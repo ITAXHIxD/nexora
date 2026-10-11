@@ -378,12 +378,9 @@ class Connect4View(NexoraView):
 
             self._build_ui()
             next_user = self.player_r if self.current_turn == "R" else self.player_y
-            content = (
-                f"🔔 {next_user.mention}, it's your turn in Connect 4! ({'🔴' if self.current_turn == 'R' else '🟡'} chip)"
-                if not self.is_solo and not self.winner_sym and not self.is_draw
-                else None
-            )
-            await interaction.response.edit_message(content=content, view=self)
+            # V2 messages cannot be edited with legacy message content.
+            # Turn alerts are sent as a separate temporary channel message below.
+            await interaction.response.edit_message(view=self)
 
             if not self.is_solo and not self.winner_sym and not self.is_draw:
                 try:
@@ -409,8 +406,7 @@ class Connect4View(NexoraView):
         self.current_turn = "R"
         self._color = BRAND_COLOR
         self._build_ui()
-        content = f"🔔 {self.player_r.mention}, it's your turn in Connect 4! (🔴 chip)" if not self.is_solo else None
-        await interaction.response.edit_message(content=content, view=self)
+        await interaction.response.edit_message(view=self)
 
         if not self.is_solo:
             try:
