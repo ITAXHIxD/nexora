@@ -258,7 +258,8 @@ class StatusDashboardView(NexoraView):
         btn_presence.callback = lambda i: self._switch_tab(i, "presence")
         btn_refresh.callback = self._on_refresh
 
-        self.add_row(btn_sys, btn_cluster, btn_games, btn_presence, DismissButton(user_id=self.requester.id))
+        self.add_row(btn_sys, btn_cluster, btn_games, btn_presence)
+        self.add_row(btn_refresh, DismissButton(user_id=self.requester.id))
 
     async def _switch_tab(self, interaction: discord.Interaction, tab: str):
         if interaction.user.id != self.requester.id:
