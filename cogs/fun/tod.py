@@ -635,11 +635,7 @@ class TruthOrDare(commands.Cog):
         )
 
         is_self = challenged.id == ctx.author.id
-        content = None
-        if not is_self:
-            content = f"🎭 {challenged.mention}, you have been challenged to Truth or Dare by {ctx.author.mention}!"
-
-        sent_msg = await send_view(ctx, view, content=content)
+        sent_msg = await send_view(ctx, view)
         view.message = sent_msg
 
         if not is_self:
