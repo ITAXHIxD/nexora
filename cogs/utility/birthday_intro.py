@@ -443,7 +443,7 @@ class WishView(BirthdayLayoutView):
 
 
 class BirthdayAnnouncementView(discord.ui.View):
-    """Legacy View for a classic embed announcement with real mention pings."""
+    """Classic birthday embed buttons with a selectable wish flow."""
 
     def __init__(self, cog, uid: int, guild_id: int, timeout=300):
         super().__init__(timeout=timeout)
@@ -451,6 +451,57 @@ class BirthdayAnnouncementView(discord.ui.View):
         self.uid = uid
         self.guild_id = guild_id
         self.wishers = set()
+
+    async def deliver_wish(self, interaction: discord.Interaction, wish_type: str, message: str):
+        """DM one selected birthday wish and report success/failure to the UI."""
+        sender_id = interaction.user.id
+        if sender_id == self.uid:
+            return False, "❌ You can't send a birthday wish to yourself!"
+        if sender_id in self.wishers:
+            return False, "✅ You've already sent them a birthday wish from this card."
+
+        guild = self.cog.bot.get_guild(self.guild_id)
+        if guild is None:
+            return False, "❌ I couldn't find the server for this birthday wish."
+
+        member = guild.get_member(self.uid)
+        if member is None:
+            try:
+                member = await guild.fetch_member(self.uid)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return False, "❌ I couldn't find that member in the server."
+
+        try:
+            profile = await self.cog.get_user(self.uid, self.guild_id) or {}
+        except Exception:
+            logger.exception("Could not read birthday-wish preferences for user %s", self.uid)
+            profile = {}
+
+        if not profile.get("dm_notifications", True):
+            return False, "📬 This member has birthday-wish DMs turned off, so your wish wasn't sent privately."
+
+        wish_embed = discord.Embed(
+            title=f"{PARTY} You've got a birthday wish!",
+            description=(
+                f"**{interaction.user.display_name}** from **{guild.name}** sent you a "
+                f"**{wish_type}** birthday wish:\n\n{message}"
+            ),
+            color=FREE_COLOR,
+            timestamp=datetime.datetime.now(datetime.timezone.utc),
+        )
+        wish_embed.set_thumbnail(url=interaction.user.display_avatar.url)
+        wish_embed.set_footer(text="Nexora Birthday System")
+
+        try:
+            await member.send(embed=wish_embed)
+        except discord.Forbidden:
+            return False, "❌ I couldn't DM them. They may have DMs from server members disabled."
+        except discord.HTTPException as exc:
+            logger.warning("Birthday wish DM failed for user %s: %s", self.uid, exc)
+            return False, "❌ Discord couldn't deliver that wish. Please try again."
+
+        self.wishers.add(sender_id)
+        return True, f"{PARTY} Your {wish_type.lower()} birthday wish was sent!"
 
     @discord.ui.button(
         label="Send Birthday Wish",
@@ -466,31 +517,14 @@ class BirthdayAnnouncementView(discord.ui.View):
             )
         if interaction.user.id in self.wishers:
             return await interaction.response.send_message(
-                f"{CHECK} You've already wished them!", ephemeral=True
+                f"{CHECK} You've already wished them from this birthday card!", ephemeral=True
             )
 
-        self.wishers.add(interaction.user.id)
-        member = interaction.guild.get_member(self.uid) if interaction.guild else None
-        profile = await self.cog.get_user(self.uid, self.guild_id)
-        if member and profile and profile.get("dm_notifications", True):
-            try:
-                wish_embed = discord.Embed(
-                    title=f"{PARTY} You've got a birthday wish!",
-                    description=(
-                        f"**{interaction.user.display_name}** from **{interaction.guild.name}** "
-                        f"wishes you a Happy Birthday! {CAKE}"
-                    ),
-                    color=FREE_COLOR,
-                )
-                wish_embed.set_thumbnail(url=interaction.user.display_avatar.url)
-                await send_ui(member, embed=wish_embed)
-            except discord.Forbidden:
-                pass
-            except discord.HTTPException:
-                logger.warning("Could not DM birthday wish to user %s", self.uid, exc_info=True)
-
         await interaction.response.send_message(
-            f"{PARTY} Wish sent!", ephemeral=True
+            f"# {CAKE} Send a Birthday Wish\n\nChoose what kind of wish you'd like to send. "
+            "You can also write your own message.",
+            view=BirthdayWishPickerView(self, requester_id=interaction.user.id),
+            ephemeral=True,
         )
 
     @discord.ui.button(
@@ -503,10 +537,140 @@ class BirthdayAnnouncementView(discord.ui.View):
     ):
         count = len(self.wishers)
         message = (
-            f"🎊 **{count}** {'person has' if count == 1 else 'people have'} wished them so far!"
-            if count else "No wishes yet — be the first! 🎉"
+            f"🎊 **{count}** {'person has' if count == 1 else 'people have'} sent a wish so far!"
+            if count else "No wishes sent yet — be the first! 🎉"
         )
         await interaction.response.send_message(message, ephemeral=True)
+
+
+BIRTHDAY_WISH_PRESETS = {
+    "sweet": (
+        "Sweet & Kind",
+        "Wishing you a birthday full of happiness, laughter, and all the little things "
+        "that make you smile. Hope this year treats you wonderfully! 💛",
+    ),
+    "funny": (
+        "Funny",
+        "Congrats on completing another trip around the sun! 🎂 May your cake be huge, "
+        "your responsibilities be tiny, and nobody expose your age in chat. 😂",
+    ),
+    "heartfelt": (
+        "Heartfelt",
+        "I hope this new year of your life brings you peace, good people, big wins, "
+        "and plenty of reasons to be proud of yourself. Happy Birthday! 💖",
+    ),
+    "friendly": (
+        "Friendly",
+        "Happy Birthday! 🥳 Hope you have an awesome day, make some great memories, "
+        "and get spoiled with all the good stuff!",
+    ),
+    "playful": (
+        "Playful",
+        "Birthday rules: cake is mandatory, chores are optional, and you're legally "
+        "allowed to be dramatic today. Have the best one! 🎉",
+    ),
+    "short": (
+        "Short & Sweet",
+        "Happy Birthday! 🎂 Hope your day is amazing!",
+    ),
+}
+
+
+class BirthdayWishPickerView(discord.ui.View):
+    """Ephemeral wish-type picker shown when the birthday button is clicked."""
+
+    def __init__(self, announcement_view: BirthdayAnnouncementView, requester_id: int, timeout=120):
+        super().__init__(timeout=timeout)
+        self.announcement_view = announcement_view
+        self.requester_id = requester_id
+        self.add_item(BirthdayWishTypeSelect(self))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.requester_id:
+            return True
+        await interaction.response.send_message(
+            "Only the person who opened this wish menu can use it.", ephemeral=True
+        )
+        return False
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+class BirthdayWishTypeSelect(discord.ui.Select):
+    def __init__(self, picker: BirthdayWishPickerView):
+        self.picker = picker
+        options = [
+            discord.SelectOption(label=label, value=key, description=message[:100], emoji=emoji)
+            for key, (label, message, emoji) in [
+                ("sweet", *BIRTHDAY_WISH_PRESETS["sweet"], "💛"),
+                ("funny", *BIRTHDAY_WISH_PRESETS["funny"], "😂"),
+                ("heartfelt", *BIRTHDAY_WISH_PRESETS["heartfelt"], "💖"),
+                ("friendly", *BIRTHDAY_WISH_PRESETS["friendly"], "🥳"),
+                ("playful", *BIRTHDAY_WISH_PRESETS["playful"], "🎉"),
+                ("short", *BIRTHDAY_WISH_PRESETS["short"], "🎂"),
+            ]
+        ]
+        options.append(
+            discord.SelectOption(
+                label="Write my own",
+                value="custom",
+                description="Type a personal message yourself",
+                emoji="✍️",
+            )
+        )
+        super().__init__(
+            placeholder="Choose a wish style…",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id=f"birthday-wish-type-{picker.requester_id}",
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        choice = self.values[0]
+        announcement = self.picker.announcement_view
+        if choice == "custom":
+            await interaction.response.send_modal(
+                BirthdayCustomWishModal(
+                    announcement,
+                    requester_id=self.picker.requester_id,
+                )
+            )
+            return
+
+        label, message = BIRTHDAY_WISH_PRESETS[choice]
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        _, result = await announcement.deliver_wish(interaction, label, message)
+        await interaction.followup.send(result, ephemeral=True)
+
+
+class BirthdayCustomWishModal(discord.ui.Modal, title="Write a Birthday Wish"):
+    message = discord.ui.TextInput(
+        label="Your birthday message",
+        placeholder="Write something kind, funny, or personal…",
+        style=discord.TextStyle.paragraph,
+        min_length=2,
+        max_length=500,
+        required=True,
+    )
+
+    def __init__(self, announcement_view: BirthdayAnnouncementView, requester_id: int):
+        super().__init__(timeout=300)
+        self.announcement_view = announcement_view
+        self.requester_id = requester_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if interaction.user.id != self.requester_id:
+            return await interaction.response.send_message(
+                "Only the person who opened this wish menu can submit it.", ephemeral=True
+            )
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        _, result = await self.announcement_view.deliver_wish(
+            interaction, "Personal", str(self.message.value).strip()
+        )
+        await interaction.followup.send(result, ephemeral=True)
 
 
 class HelpView(BirthdayLayoutView):
