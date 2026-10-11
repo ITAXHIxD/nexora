@@ -981,9 +981,9 @@ class BirthdayWishSetupSelect(discord.ui.Select):
         await interaction.response.edit_message(content=refreshed.summary(), view=refreshed)
 
 
-class BirthdayWishSetupModal(discord.ui.Modal, title="Custom Birthday Announcement"):
+class BirthdayWishSetupModal(discord.ui.Modal, title="Custom Birthday Card Text"):
     message = discord.ui.TextInput(
-        label="Your birthday announcement message",
+        label="Your embed card text",
         placeholder="Use {mention} to mention yourself and {name} for your display name",
         style=discord.TextStyle.paragraph,
         min_length=2,
@@ -2130,8 +2130,8 @@ class BirthdayIntro(commands.Cog):
     # PREMIUM COMMANDS
     # ══════════════════════════════════════════════════════════════════════════
 
-    @commands.hybrid_command(name="birthdaywish", description="Choose your birthday announcement format and wish text")
-    @app_commands.describe(message="Optional custom message. Leave blank to open the settings menu.")
+    @commands.hybrid_command(name="birthdaywish", description="Customize birthday message and embed text")
+    @app_commands.describe(message="Optional custom embed text. Leave blank to open all settings.")
     @commands.guild_only()
     async def birthdaywish(self, ctx: commands.Context, *, message: Optional[str] = None):
         """FREE — Choose format and customize birthday announcement text."""
