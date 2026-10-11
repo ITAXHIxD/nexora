@@ -3,4 +3,4 @@ aiohttp
 python-dotenv
 pillow
 psutil
-motor
+motor[srv]
