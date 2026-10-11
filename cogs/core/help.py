@@ -67,6 +67,31 @@ def prefix(bot) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 
 COMMAND_DATA = {
+    "help": {
+        "name": "help",
+        "aliases": ["h", "cmds", "commands"],
+        "category": "info",
+        "premium": False,
+        "admin": False,
+        "description": "Browse all commands by category or get detailed instructions for one command",
+        "usage": [
+            "n!help [command]",
+            "/help [command]",
+        ],
+        "examples": [
+            "n!help",
+            "n!help afk",
+            "/help",
+            "/help birthdaywish",
+        ],
+        "notes": [
+            "Leave the command name blank to open the interactive command browser",
+            "Use /help <command> to see usage, examples, notes, and related commands",
+            "Newly loaded commands are added to the browser automatically",
+        ],
+        "related": ["birthdayhelp", "birthdaywish"],
+    },
+
     # ── BIRTHDAY ──────────────────────────────────────────────────────────────
     "setbirthday": {
         "name": "setbirthday",
@@ -269,21 +294,24 @@ COMMAND_DATA = {
         "category": "utility",
         "premium": False,
         "admin": False,
-        "description": "Set a custom message for your birthday announcement",
+        "description": "Customize birthday announcement format and edit normal-message and embed-card text separately",
         "usage": [
-            "n!birthdaywish <message>",
-            "/birthdaywish <message>",
+            "n!birthdaywish",
+            "/birthdaywish",
+            "n!birthdaywish <embed text>",
+            "/birthdaywish <embed text>",
         ],
         "examples": [
-            "n!birthdaywish {mention} is finally old! 🎉",
-            "n!birthdaywish It's {name}'s special day — shower them with love! 💕",
+            "/birthdaywish",
             "/birthdaywish {mention} just leveled up in real life! 🎂",
+            "n!birthdaywish It's {name}'s special day — shower them with love! 💕",
         ],
         "notes": [
-            "Use `{mention}` to include your @mention in the message",
-            "Use `{name}` to include your display name",
-            "Max 200 characters",
-            "A preview of how it looks is shown when you set it",
+            "Choose Embed only, Normal message only, or Both message and embed",
+            "Click Customize message + embed to write different text for the normal message and the embed card",
+            "Use {mention} to mention the birthday person and {name} to insert their display name",
+            "The optional command argument customizes the embed-card text (maximum 200 characters)",
+            "Your chosen format and custom texts are saved to your profile in this server",
         ],
         "related": ["birthdayscope", "myprofile", "birthdaynotify"],
     },
@@ -2116,7 +2144,7 @@ class Help(commands.Cog):
         """Index all commands across bot.commands and bot.tree."""
         registry = dict(COMMAND_DATA)
 
-        skip = {"help", "h", "cmds", "commands"}
+        skip = {"h", "cmds", "commands"}
 
         for cmd in self.bot.commands:
             name = cmd.name
@@ -2125,6 +2153,8 @@ class Help(commands.Cog):
             if name not in registry:
                 registry[name] = _make_stub(cmd)
             for alias in (cmd.aliases or []):
+                if alias in skip:
+                    continue
                 if alias not in registry:
                     stub = _make_stub(cmd)
                     stub["name"] = alias
