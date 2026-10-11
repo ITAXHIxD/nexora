@@ -759,7 +759,7 @@ class BirthdayIntro(commands.Cog):
             channel = guild.get_channel(channel_id)
             if channel is None:
                 try:
-                    channel = await guild.fetch_channel(channel_id)
+                    channel = await self.bot.fetch_channel(channel_id)
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException) as exc:
                     stats["missing_channel"] += 1
                     logger.warning(
@@ -856,7 +856,7 @@ class BirthdayIntro(commands.Cog):
                         other_channel_id = int(other_channel_id)
                         other_channel = other_guild.get_channel(other_channel_id)
                         if other_channel is None:
-                            other_channel = await other_guild.fetch_channel(other_channel_id)
+                            other_channel = await self.bot.fetch_channel(other_channel_id)
                         await send_ui(
                             other_channel,
                             view=WishView(
