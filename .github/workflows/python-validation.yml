@@ -1,0 +1,78 @@
+name: Python validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile bot source
+        run: python -m compileall -q bot.py cogs utils migrate_to_mongo.py
+
+      - name: Validate JSON files
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          skipped_parts = {".git", "venv", ".venv", "__pycache__"}
+          files = [
+              path for path in Path(".").rglob("*.json")
+              if not any(part in skipped_parts for part in path.parts)
+          ]
+          failures = []
+          for path in files:
+              try:
+                  with path.open("r", encoding="utf-8") as handle:
+                      json.load(handle)
+              except Exception as exc:
+                  failures.append(f"{path}: {exc}")
+
+          if failures:
+              raise SystemExit("Invalid JSON files:\n" + "\n".join(failures))
+          print(f"Validated {len(files)} JSON files.")
+          PY
+
+      - name: Check configured extensions
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          tree = ast.parse(Path("bot.py").read_text(encoding="utf-8"))
+          extensions = None
+          for node in tree.body:
+              if isinstance(node, ast.Assign):
+                  if any(isinstance(target, ast.Name) and target.id == "EXTENSIONS" for target in node.targets):
+                      extensions = ast.literal_eval(node.value)
+                      break
+
+          if extensions is None:
+              raise SystemExit("EXTENSIONS list not found in bot.py")
+          if len(extensions) != len(set(extensions)):
+              raise SystemExit("Duplicate entry found in EXTENSIONS")
+
+          missing = [
+              module for module in extensions
+              if not Path(*module.split(".")).with_suffix(".py").is_file()
+          ]
+          if missing:
+              raise SystemExit("Configured extensions missing source files:\n" + "\n".join(missing))
+          print(f"Validated {len(extensions)} configured extension paths.")
+          PY
