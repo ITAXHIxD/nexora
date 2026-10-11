@@ -497,6 +497,7 @@ class BirthdayIntro(commands.Cog):
         self.scol = None
         self.user_store_path = os.path.join("data", "birthday_data.json")
         self.settings_store_path = os.path.join("data", "birthday_settings.json")
+        self.birthday_sent_path = os.path.join("data", "birthday_sent.json")
         self._startup_birthday_check_started = False
         self._birthday_check_lock = asyncio.Lock()
 
@@ -595,6 +596,85 @@ class BirthdayIntro(commands.Cog):
         with open(path, "w", encoding="utf-8") as fp:
             json.dump(payload, fp, indent=2, ensure_ascii=False)
 
+    def _save_birthday_sent_log(self, payload: dict):
+        """Atomically persist only today's birthday announcement records."""
+        os.makedirs(os.path.dirname(self.birthday_sent_path), exist_ok=True)
+        temp_path = self.birthday_sent_path + ".tmp"
+        try:
+            with open(temp_path, "w", encoding="utf-8") as fp:
+                json.dump(payload, fp, indent=2, ensure_ascii=False)
+            os.replace(temp_path, self.birthday_sent_path)
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+
+    def _load_birthday_sent_log(self, today: datetime.date) -> dict:
+        """Load today's send ledger and purge every record from another date."""
+        if not os.path.exists(self.birthday_sent_path):
+            return {}
+
+        try:
+            with open(self.birthday_sent_path, "r", encoding="utf-8") as fp:
+                loaded = json.load(fp)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning(
+                "Could not read birthday send ledger %s (%s); treating it as empty",
+                self.birthday_sent_path, exc,
+            )
+            return {}
+
+        if not isinstance(loaded, dict):
+            logger.warning("Birthday send ledger is not a JSON object; treating it as empty")
+            return {}
+
+        today_key = today.isoformat()
+        current = {
+            str(key): entry
+            for key, entry in loaded.items()
+            if isinstance(entry, dict) and entry.get("date") == today_key
+        }
+        removed = len(loaded) - len(current)
+        if removed:
+            try:
+                self._save_birthday_sent_log(current)
+                logger.info(
+                    "Birthday send ledger: removed %s stale record(s); keeping %s from %s",
+                    removed, len(current), today_key,
+                )
+            except OSError:
+                logger.exception("Could not prune stale birthday send ledger entries")
+        return current
+
+    def _has_sent_birthday_today(
+        self, sent_log: dict, guild_id: int, user_id: int, today: datetime.date
+    ) -> bool:
+        entry = sent_log.get(f"{guild_id}:{user_id}")
+        return isinstance(entry, dict) and entry.get("date") == today.isoformat()
+
+    def _record_birthday_sent(
+        self, sent_log: dict, guild_id: int, user_id: int, now: datetime.datetime
+    ):
+        """Record a successful announcement so restarts won't send it twice today."""
+        key = f"{guild_id}:{user_id}"
+        sent_log[key] = {
+            "guild_id": int(guild_id),
+            "user_id": int(user_id),
+            "date": now.date().isoformat(),
+            "sent_at": now.isoformat(),
+        }
+        try:
+            self._save_birthday_sent_log(sent_log)
+        except OSError:
+            # The Discord send already succeeded; make the persistence failure
+            # prominent so it can be fixed before a restart causes a duplicate.
+            logger.exception(
+                "Birthday was announced to user %s in guild %s, but the send ledger could not be saved",
+                user_id, guild_id,
+            )
+
     def _normalize_birthday_doc(self, doc: dict) -> Optional[dict]:
         if not isinstance(doc, dict):
             return None
@@ -679,10 +759,13 @@ class BirthdayIntro(commands.Cog):
 
     async def _process_birthdays(self):
         now = datetime.datetime.now(datetime.timezone.utc)
+        # A persistent daily ledger prevents duplicate wishes across restarts.
+        # Any record whose date isn't today is purged before scanning birthdays.
+        sent_log = self._load_birthday_sent_log(now.date())
         stats = {
             "profiles": 0,
             "due_today": 0,
-            "already_notified": 0,
+            "already_sent_today": 0,
             "missing_guild": 0,
             "missing_member": 0,
             "missing_channel": 0,
@@ -696,15 +779,13 @@ class BirthdayIntro(commands.Cog):
                 continue
             stats["due_today"] += 1
 
-            try:
-                already_notified = int(doc.get("last_notified_year") or 0) == now.year
-            except (TypeError, ValueError):
-                already_notified = False
-            if already_notified:
-                stats["already_notified"] += 1
+            guild_id = int(doc.get("guild_id") or 0)
+            if self._has_sent_birthday_today(
+                sent_log, guild_id, doc["_id"], now.date()
+            ):
+                stats["already_sent_today"] += 1
                 continue
 
-            guild_id = int(doc.get("guild_id") or 0)
             guild = self.bot.get_guild(guild_id)
             if guild is None:
                 stats["missing_guild"] += 1
@@ -831,11 +912,9 @@ class BirthdayIntro(commands.Cog):
                 # Do not mark this year as notified; a later check can retry.
                 continue
 
-            # Mark only after the primary announcement succeeds. This prevents
-            # a missing channel or Discord send failure from suppressing retries.
-            await self.upsert_user(
-                doc["_id"], guild.id, {"last_notified_year": now.year}
-            )
+            # Mark only after Discord accepted the announcement. The ledger is
+            # written to disk, so a restart on the same day won't wish them twice.
+            self._record_birthday_sent(sent_log, guild.id, doc["_id"], now)
             stats["announced"] += 1
 
             if doc.get("scope") == "mutual" and await self.is_premium(guild.id):
@@ -848,6 +927,10 @@ class BirthdayIntro(commands.Cog):
                             other_member = await other_guild.fetch_member(doc["_id"])
                         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                             continue
+                    if self._has_sent_birthday_today(
+                        sent_log, other_guild.id, doc["_id"], now.date()
+                    ):
+                        continue
                     other_settings = await self.get_settings(other_guild.id)
                     other_channel_id = other_settings.get("announce_channel_id")
                     if not other_channel_id:
@@ -868,6 +951,9 @@ class BirthdayIntro(commands.Cog):
                                 color=PREMIUM_COLOR,
                             ),
                         )
+                        self._record_birthday_sent(
+                            sent_log, other_guild.id, doc["_id"], now
+                        )
                     except (TypeError, ValueError, discord.NotFound, discord.Forbidden, discord.HTTPException) as exc:
                         logger.warning(
                             "Cross-server birthday announcement failed for user %s in guild %s: %s",
@@ -876,7 +962,7 @@ class BirthdayIntro(commands.Cog):
 
         logger.info(
             "Birthday check summary: scanned=%(profiles)s, due_today=%(due_today)s, "
-            "already_notified=%(already_notified)s, announced=%(announced)s, "
+            "already_sent_today=%(already_sent_today)s, announced=%(announced)s, "
             "missing_guild=%(missing_guild)s, missing_member=%(missing_member)s, "
             "missing_channel=%(missing_channel)s, failed_send=%(failed_send)s",
             stats,
