@@ -680,6 +680,240 @@ class BirthdayCustomWishModal(discord.ui.Modal, title="Write a Birthday Wish"):
         await interaction.followup.send(result, ephemeral=True)
 
 
+class BirthdayWishSetupView(discord.ui.View):
+    """Private menu to set the format and text of your own birthday announcement."""
+
+    def __init__(
+        self,
+        cog,
+        user_id: int,
+        guild_id: int,
+        user_mention: str,
+        display_name: str,
+        *,
+        announcement_style: str = "both",
+        custom_wish: Optional[str] = None,
+        timeout=180,
+    ):
+        super().__init__(timeout=timeout)
+        self.cog = cog
+        self.user_id = user_id
+        self.guild_id = guild_id
+        self.user_mention = user_mention
+        self.display_name = display_name
+        self.announcement_style = announcement_style if announcement_style in {"embed", "message", "both"} else "both"
+        self.custom_wish = custom_wish
+        self.message_style = self._get_message_style(custom_wish)
+        self.add_item(BirthdayAnnouncementFormatSelect(self))
+        self.add_item(BirthdayWishSetupSelect(self))
+
+    @staticmethod
+    def _get_message_style(custom_wish: Optional[str]) -> str:
+        if not custom_wish:
+            return "default"
+        for key, (_, message) in BIRTHDAY_WISH_PRESETS.items():
+            if custom_wish == message:
+                return key
+        return "custom"
+
+    def format_label(self) -> str:
+        return {
+            "embed": "Embed only",
+            "message": "Normal message only",
+            "both": "Both message and embed",
+        }.get(self.announcement_style, "Both message and embed")
+
+    def message_label(self) -> str:
+        if self.message_style == "default":
+            return "Default Nexora birthday message"
+        if self.message_style == "custom":
+            return "Your custom message"
+        return BIRTHDAY_WISH_PRESETS[self.message_style][0]
+
+    def summary(self) -> str:
+        return (
+            "# 🎂 Birthday Announcement Settings\n\n"
+            f"**Format:** {self.format_label()}\n"
+            f"**Wish text:** {self.message_label()}\n\n"
+            "Choose a format and a wish style below. These settings are saved for your birthday announcements."
+        )
+
+    def refreshed(self):
+        return BirthdayWishSetupView(
+            self.cog,
+            self.user_id,
+            self.guild_id,
+            self.user_mention,
+            self.display_name,
+            announcement_style=self.announcement_style,
+            custom_wish=self.custom_wish,
+            timeout=self.timeout,
+        )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the member who opened this settings menu can use it.", ephemeral=True
+        )
+        return False
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+class BirthdayAnnouncementFormatSelect(discord.ui.Select):
+    def __init__(self, setup_view: BirthdayWishSetupView):
+        self.setup_view = setup_view
+        choices = [
+            ("embed", "Embed only", "Use the birthday card embed", "🖼️"),
+            ("message", "Normal message only", "Use plain text without an embed", "💬"),
+            ("both", "Both message and embed", "Show the text and the embed card", "✨"),
+        ]
+        options = [
+            discord.SelectOption(
+                label=label,
+                value=value,
+                description=description,
+                emoji=emoji,
+                default=value == setup_view.announcement_style,
+            )
+            for value, label, description, emoji in choices
+        ]
+        super().__init__(
+            placeholder="Choose announcement format…",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id=f"birthday-announcement-format-{setup_view.user_id}",
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.setup_view
+        view.announcement_style = self.values[0]
+        await view.cog.upsert_user(
+            view.user_id,
+            view.guild_id,
+            {"announcement_style": view.announcement_style},
+        )
+        refreshed = view.refreshed()
+        await interaction.response.edit_message(content=refreshed.summary(), view=refreshed)
+
+
+class BirthdayWishSetupSelect(discord.ui.Select):
+    def __init__(self, setup_view: BirthdayWishSetupView):
+        self.setup_view = setup_view
+        options = [
+            discord.SelectOption(
+                label="Default Nexora message",
+                value="default",
+                description="Use Nexora's standard birthday wording",
+                emoji="🎂",
+                default=setup_view.message_style == "default",
+            )
+        ]
+        for key, emoji in [
+            ("sweet", "💛"),
+            ("funny", "😂"),
+            ("heartfelt", "💖"),
+            ("friendly", "🥳"),
+            ("playful", "🎉"),
+            ("short", "🎈"),
+        ]:
+            label, message = BIRTHDAY_WISH_PRESETS[key]
+            options.append(
+                discord.SelectOption(
+                    label=label,
+                    value=key,
+                    description=message[:100],
+                    emoji=emoji,
+                    default=setup_view.message_style == key,
+                )
+            )
+        options.append(
+            discord.SelectOption(
+                label="Write my own",
+                value="custom",
+                description="Enter a custom birthday message",
+                emoji="✍️",
+                default=setup_view.message_style == "custom",
+            )
+        )
+        super().__init__(
+            placeholder="Choose birthday wish text…",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id=f"birthday-announcement-text-{setup_view.user_id}",
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.setup_view
+        choice = self.values[0]
+        if choice == "custom":
+            await interaction.response.send_modal(
+                BirthdayWishSetupModal(
+                    view.cog,
+                    view.user_id,
+                    view.guild_id,
+                    view.user_mention,
+                    view.display_name,
+                )
+            )
+            return
+
+        custom_wish = BIRTHDAY_WISH_PRESETS[choice][1] if choice in BIRTHDAY_WISH_PRESETS else None
+        await view.cog.upsert_user(
+            view.user_id,
+            view.guild_id,
+            {"custom_wish": custom_wish},
+        )
+        view.custom_wish = custom_wish
+        view.message_style = choice
+        refreshed = view.refreshed()
+        await interaction.response.edit_message(content=refreshed.summary(), view=refreshed)
+
+
+class BirthdayWishSetupModal(discord.ui.Modal, title="Custom Birthday Announcement"):
+    message = discord.ui.TextInput(
+        label="Your birthday announcement message",
+        placeholder="Use {mention} to mention yourself and {name} for your display name",
+        style=discord.TextStyle.paragraph,
+        min_length=2,
+        max_length=200,
+        required=True,
+    )
+
+    def __init__(self, cog, user_id: int, guild_id: int, user_mention: str, display_name: str):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.user_id = user_id
+        self.guild_id = guild_id
+        self.user_mention = user_mention
+        self.display_name = display_name
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw_message = str(self.message.value).strip()
+        try:
+            preview = raw_message.format(mention=self.user_mention, name=self.display_name)
+        except (IndexError, KeyError, ValueError):
+            return await interaction.response.send_message(
+                "Use only the {mention} and {name} placeholders in your birthday message.",
+                ephemeral=True,
+            )
+
+        await self.cog.upsert_user(
+            self.user_id,
+            self.guild_id,
+            {"custom_wish": raw_message},
+        )
+        await interaction.response.send_message(
+            f"✅ Custom birthday message saved!\n\nPreview:\n{preview}",
+            ephemeral=True,
+        )
+
+
 class HelpView(BirthdayLayoutView):
     def __init__(self, pages: dict, selected="home", timeout=180):
         super().__init__(color=BRAND_COLOR, timeout=timeout)
@@ -1139,11 +1373,13 @@ class BirthdayIntro(commands.Cog):
                 logger.warning("Invalid custom birthday template for %s: %s", doc["_id"], exc)
                 rendered = f"{PARTY} It's {member.mention}'s birthday today! Wish them well! {CAKE}"
             desc = rendered + age_line + pronoun_line + "\n\n*Click below to send a wish!*"
+            announcement_style = doc.get("announcement_style", "both")
+            if announcement_style not in {"embed", "message", "both"}:
+                announcement_style = "both"
 
-            # Use a classic Discord message here: plain message content is
-            # where actual mention notifications are generated, while the embed
-            # carries the birthday card. Components V2 layouts cannot share a
-            # message with legacy embeds, so use a normal View for these buttons.
+            # Pings must be in message content to notify members. For the
+            # embed-only setting, keep the content to the ping line and put
+            # the birthday text in the embed card.
             embed = discord.Embed(
                 title=f"{CAKE} Happy Birthday, {display}! {CAKE}",
                 description=desc,
@@ -1152,12 +1388,30 @@ class BirthdayIntro(commands.Cog):
             )
             embed.set_thumbnail(url=member.display_avatar.url)
             embed.set_footer(text=f"{guild.name} • Birthday System")
-            ping_text = " ".join(
-                mention for mention in (
-                    member.mention,
-                    ping_role.mention if ping_role else None,
-                ) if mention
-            )
+
+            normal_body = rendered + age_line + pronoun_line + "\n\nUse the buttons below to send a birthday wish!"
+            required_pings = []
+            if member.mention not in normal_body:
+                required_pings.append(member.mention)
+            if ping_role and ping_role.mention not in normal_body:
+                required_pings.append(ping_role.mention)
+            normal_content = " ".join(required_pings + [normal_body]) if required_pings else normal_body
+
+            if announcement_style == "embed":
+                message_content = " ".join(
+                    mention for mention in (
+                        member.mention,
+                        ping_role.mention if ping_role else None,
+                    ) if mention
+                )
+                message_embed = embed
+            elif announcement_style == "message":
+                message_content = normal_content
+                message_embed = None
+            else:
+                message_content = normal_content
+                message_embed = embed
+
             allowed_mentions = discord.AllowedMentions(
                 users=[member],
                 roles=[ping_role] if ping_role else [],
@@ -1167,8 +1421,8 @@ class BirthdayIntro(commands.Cog):
 
             try:
                 await channel.send(
-                    content=ping_text,
-                    embed=embed,
+                    content=message_content,
+                    embed=message_embed,
                     view=BirthdayAnnouncementView(self, uid=doc["_id"], guild_id=guild.id),
                     allowed_mentions=allowed_mentions,
                 )
@@ -1219,6 +1473,9 @@ class BirthdayIntro(commands.Cog):
                         except (TypeError, ValueError):
                             other_ping_role = None
 
+                        announcement_style = doc.get("announcement_style", "both")
+                        if announcement_style not in {"embed", "message", "both"}:
+                            announcement_style = "both"
                         cross_embed = discord.Embed(
                             title=f"{CAKE} Happy Birthday, {display}! {CAKE}",
                             description=desc,
@@ -1227,12 +1484,29 @@ class BirthdayIntro(commands.Cog):
                         )
                         cross_embed.set_thumbnail(url=other_member.display_avatar.url)
                         cross_embed.set_footer(text=f"{other_guild.name} • Birthday System • Premium")
-                        cross_ping_text = " ".join(
-                            mention for mention in (
-                                other_member.mention,
-                                other_ping_role.mention if other_ping_role else None,
-                            ) if mention
-                        )
+                        cross_body = rendered + age_line + pronoun_line + "\n\nUse the buttons below to send a birthday wish!"
+                        cross_required_pings = []
+                        if other_member.mention not in cross_body:
+                            cross_required_pings.append(other_member.mention)
+                        if other_ping_role and other_ping_role.mention not in cross_body:
+                            cross_required_pings.append(other_ping_role.mention)
+                        cross_normal_content = " ".join(cross_required_pings + [cross_body]) if cross_required_pings else cross_body
+
+                        if announcement_style == "embed":
+                            cross_message_content = " ".join(
+                                mention for mention in (
+                                    other_member.mention,
+                                    other_ping_role.mention if other_ping_role else None,
+                                ) if mention
+                            )
+                            cross_message_embed = cross_embed
+                        elif announcement_style == "message":
+                            cross_message_content = cross_normal_content
+                            cross_message_embed = None
+                        else:
+                            cross_message_content = cross_normal_content
+                            cross_message_embed = cross_embed
+
                         cross_allowed_mentions = discord.AllowedMentions(
                             users=[other_member],
                             roles=[other_ping_role] if other_ping_role else [],
@@ -1240,10 +1514,10 @@ class BirthdayIntro(commands.Cog):
                             replied_user=False,
                         )
                         await other_channel.send(
-                            content=cross_ping_text,
-                            embed=cross_embed,
+                            content=cross_message_content,
+                            embed=cross_message_embed,
                             view=BirthdayAnnouncementView(
-                                self, uid=doc["_id"], guild_id=guild.id
+                                self, uid=doc["_id"], guild_id=other_guild.id
                             ),
                             allowed_mentions=cross_allowed_mentions,
                         )
@@ -1730,18 +2004,40 @@ class BirthdayIntro(commands.Cog):
     # PREMIUM COMMANDS
     # ══════════════════════════════════════════════════════════════════════════
 
-    @commands.hybrid_command(name="birthdaywish", description="Set a personal birthday announcement message")
-    @app_commands.describe(message="Your message. Use {mention} for your ping, {name} for display name")
+    @commands.hybrid_command(name="birthdaywish", description="Choose your birthday announcement format and wish text")
+    @app_commands.describe(message="Optional custom message. Leave blank to open the settings menu.")
     @commands.guild_only()
-    async def birthdaywish(self, ctx: commands.Context, *, message: str):
-        """FREE — Customize the message shown on your birthday announcement."""
+    async def birthdaywish(self, ctx: commands.Context, *, message: Optional[str] = None):
+        """FREE — Choose embed/message format and save a birthday wish."""
+        if message is None or not message.strip():
+            profile = await self.get_user(ctx.author.id, ctx.guild.id) or {}
+            view = BirthdayWishSetupView(
+                self,
+                ctx.author.id,
+                ctx.guild.id,
+                ctx.author.mention,
+                ctx.author.display_name,
+                announcement_style=profile.get("announcement_style", "both"),
+                custom_wish=profile.get("custom_wish"),
+            )
+            content = view.summary()
+            if ctx.interaction is not None:
+                if ctx.interaction.response.is_done():
+                    await ctx.interaction.followup.send(content=content, view=view, ephemeral=True)
+                else:
+                    await ctx.interaction.response.send_message(content=content, view=view, ephemeral=True)
+            else:
+                await ctx.send(content=content, view=view)
+            return
+
+        message = message.strip()
         if len(message) > 200:
             return await send_ui(ctx, embed=error_embed("Max 200 characters.", ctx=ctx), ephemeral=True)
         try:
             preview = message.format(mention=ctx.author.mention, name=ctx.author.display_name)
         except (IndexError, KeyError, ValueError):
             return await send_ui(ctx, embed=error_embed(
-                "Use only `{mention}` and `{name}` placeholders in birthday wishes.", ctx=ctx
+                "Use only {mention} and {name} placeholders in birthday wishes.", ctx=ctx
             ), ephemeral=True)
         await self.upsert_user(ctx.author.id, ctx.guild.id, {"custom_wish": message})
         embed = success_embed("Custom Wish Saved!", f"**Preview:**\n{preview}", ctx=ctx)
@@ -1749,7 +2045,7 @@ class BirthdayIntro(commands.Cog):
         embed.set_footer(text="This will appear in your birthday announcement")
         await send_ui(ctx, embed=embed, ephemeral=True)
 
-    @commands.hybrid_command(name="birthdayscope", description="Premium — Choose where your birthday gets announced")
+    @commands.hybrid_command(name="birthdayscope"    @commands.hybrid_command(name="birthdayscope", description="Premium — Choose where your birthday gets announced")
     @app_commands.describe(scope="server = this server only | mutual = all mutual servers with the bot")
     @app_commands.choices(scope=[
         app_commands.Choice(name="This server only", value="server"),
