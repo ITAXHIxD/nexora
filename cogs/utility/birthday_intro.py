@@ -442,6 +442,73 @@ class WishView(BirthdayLayoutView):
                     child.disabled = True
 
 
+class BirthdayAnnouncementView(discord.ui.View):
+    """Legacy View for a classic embed announcement with real mention pings."""
+
+    def __init__(self, cog, uid: int, guild_id: int, timeout=300):
+        super().__init__(timeout=timeout)
+        self.cog = cog
+        self.uid = uid
+        self.guild_id = guild_id
+        self.wishers = set()
+
+    @discord.ui.button(
+        label="Send Birthday Wish",
+        style=discord.ButtonStyle.green,
+        emoji=PARTY,
+    )
+    async def send_birthday_wish(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if interaction.user.id == self.uid:
+            return await interaction.response.send_message(
+                f"{CROSS} You can't wish yourself!", ephemeral=True
+            )
+        if interaction.user.id in self.wishers:
+            return await interaction.response.send_message(
+                f"{CHECK} You've already wished them!", ephemeral=True
+            )
+
+        self.wishers.add(interaction.user.id)
+        member = interaction.guild.get_member(self.uid) if interaction.guild else None
+        profile = await self.cog.get_user(self.uid, self.guild_id)
+        if member and profile and profile.get("dm_notifications", True):
+            try:
+                wish_embed = discord.Embed(
+                    title=f"{PARTY} You've got a birthday wish!",
+                    description=(
+                        f"**{interaction.user.display_name}** from **{interaction.guild.name}** "
+                        f"wishes you a Happy Birthday! {CAKE}"
+                    ),
+                    color=FREE_COLOR,
+                )
+                wish_embed.set_thumbnail(url=interaction.user.display_avatar.url)
+                await send_ui(member, embed=wish_embed)
+            except discord.Forbidden:
+                pass
+            except discord.HTTPException:
+                logger.warning("Could not DM birthday wish to user %s", self.uid, exc_info=True)
+
+        await interaction.response.send_message(
+            f"{PARTY} Wish sent!", ephemeral=True
+        )
+
+    @discord.ui.button(
+        label="View Wishers",
+        style=discord.ButtonStyle.secondary,
+        emoji=GIFT,
+    )
+    async def view_birthday_wishers(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        count = len(self.wishers)
+        message = (
+            f"🎊 **{count}** {'person has' if count == 1 else 'people have'} wished them so far!"
+            if count else "No wishes yet — be the first! 🎉"
+        )
+        await interaction.response.send_message(message, ephemeral=True)
+
+
 class HelpView(BirthdayLayoutView):
     def __init__(self, pages: dict, selected="home", timeout=180):
         super().__init__(color=BRAND_COLOR, timeout=timeout)
@@ -869,6 +936,17 @@ class BirthdayIntro(commands.Cog):
                         role.id, guild.id, exc,
                     )
 
+            ping_role_id = settings.get("ping_role_id")
+            try:
+                ping_role = guild.get_role(int(ping_role_id)) if ping_role_id else None
+            except (TypeError, ValueError):
+                ping_role = None
+            if ping_role_id and ping_role is None:
+                logger.warning(
+                    "Configured birthday ping role %r was not found in guild %s",
+                    ping_role_id, guild.id,
+                )
+
             display = doc.get("name") or member.display_name
             age_line, pronoun_line = "", ""
             if doc.get("year"):
@@ -891,17 +969,37 @@ class BirthdayIntro(commands.Cog):
                 rendered = f"{PARTY} It's {member.mention}'s birthday today! Wish them well! {CAKE}"
             desc = rendered + age_line + pronoun_line + "\n\n*Click below to send a wish!*"
 
+            # Use a classic Discord message here: plain message content is
+            # where actual mention notifications are generated, while the embed
+            # carries the birthday card. Components V2 layouts cannot share a
+            # message with legacy embeds, so use a normal View for these buttons.
+            embed = discord.Embed(
+                title=f"{CAKE} Happy Birthday, {display}! {CAKE}",
+                description=desc,
+                color=PREMIUM_COLOR if is_prem else TODAY_COLOR,
+                timestamp=now,
+            )
+            embed.set_thumbnail(url=member.display_avatar.url)
+            embed.set_footer(text=f"{guild.name} • Birthday System")
+            ping_text = " ".join(
+                mention for mention in (
+                    member.mention,
+                    ping_role.mention if ping_role else None,
+                ) if mention
+            )
+            allowed_mentions = discord.AllowedMentions(
+                users=[member],
+                roles=[ping_role] if ping_role else [],
+                everyone=False,
+                replied_user=False,
+            )
+
             try:
-                await send_ui(
-                    channel,
-                    view=WishView(
-                        self,
-                        uid=doc["_id"],
-                        guild_id=guild.id,
-                        title=f"{CAKE} Happy Birthday, {display}! {CAKE}",
-                        description=desc,
-                        color=PREMIUM_COLOR if is_prem else TODAY_COLOR,
-                    ),
+                await channel.send(
+                    content=ping_text,
+                    embed=embed,
+                    view=BirthdayAnnouncementView(self, uid=doc["_id"], guild_id=guild.id),
+                    allowed_mentions=allowed_mentions,
                 )
             except discord.HTTPException as exc:
                 stats["failed_send"] += 1
@@ -940,16 +1038,43 @@ class BirthdayIntro(commands.Cog):
                         other_channel = other_guild.get_channel(other_channel_id)
                         if other_channel is None:
                             other_channel = await self.bot.fetch_channel(other_channel_id)
-                        await send_ui(
-                            other_channel,
-                            view=WishView(
-                                self,
-                                uid=doc["_id"],
-                                guild_id=guild.id,
-                                title=f"{CAKE} Happy Birthday, {display}! {CAKE}",
-                                description=desc,
-                                color=PREMIUM_COLOR,
+
+                        other_ping_role_id = other_settings.get("ping_role_id")
+                        try:
+                            other_ping_role = (
+                                other_guild.get_role(int(other_ping_role_id))
+                                if other_ping_role_id else None
+                            )
+                        except (TypeError, ValueError):
+                            other_ping_role = None
+
+                        cross_embed = discord.Embed(
+                            title=f"{CAKE} Happy Birthday, {display}! {CAKE}",
+                            description=desc,
+                            color=PREMIUM_COLOR,
+                            timestamp=now,
+                        )
+                        cross_embed.set_thumbnail(url=other_member.display_avatar.url)
+                        cross_embed.set_footer(text=f"{other_guild.name} • Birthday System • Premium")
+                        cross_ping_text = " ".join(
+                            mention for mention in (
+                                other_member.mention,
+                                other_ping_role.mention if other_ping_role else None,
+                            ) if mention
+                        )
+                        cross_allowed_mentions = discord.AllowedMentions(
+                            users=[other_member],
+                            roles=[other_ping_role] if other_ping_role else [],
+                            everyone=False,
+                            replied_user=False,
+                        )
+                        await other_channel.send(
+                            content=cross_ping_text,
+                            embed=cross_embed,
+                            view=BirthdayAnnouncementView(
+                                self, uid=doc["_id"], guild_id=guild.id
                             ),
+                            allowed_mentions=cross_allowed_mentions,
                         )
                         self._record_birthday_sent(
                             sent_log, other_guild.id, doc["_id"], now
@@ -1120,9 +1245,10 @@ class BirthdayIntro(commands.Cog):
             title=f"{GEAR} Admin Setup",
             description=(
                 "One-time configuration for server staff:\n\n"
-                "`/introbdsetup <intro_channel> <announce_channel> [birthday_role]`\n"
+                "`/introbdsetup <intro_channel> <announce_channel> [birthday_role] [ping_role]`\n"
                 "— tells the bot where to read intros from, where to post birthday "
-                "announcements, and (optionally) a role to grant for the day.\n\n"
+                "announcements, optionally which role to grant for the day, and which role "
+                "to ping in birthday announcements. The birthday person is pinged too.\n\n"
                 "Once set up, the bot auto-detects birthdays, names, ages, and "
                 "pronouns from new messages in the intro channel — nothing else "
                 "to configure."
@@ -1385,20 +1511,30 @@ class BirthdayIntro(commands.Cog):
         intro_channel="The #introductions channel to watch",
         announce_channel="Channel for birthday announcements",
         birthday_role="Role to give members on their birthday (optional)",
+        ping_role="Role to ping in the birthday announcement (optional)",
     )
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
-    async def introbdsetup(self, ctx: commands.Context, intro_channel: discord.TextChannel, announce_channel: discord.TextChannel, birthday_role: Optional[discord.Role] = None):
-        """FREE (admin) — Set up the birthday system"""
+    async def introbdsetup(
+        self,
+        ctx: commands.Context,
+        intro_channel: discord.TextChannel,
+        announce_channel: discord.TextChannel,
+        birthday_role: Optional[discord.Role] = None,
+        ping_role: Optional[discord.Role] = None,
+    ):
+        """FREE (admin) — Set up birthday scanning, announcements, and pings."""
         await self.upsert_settings(ctx.guild.id, {
             "intro_channel_id": intro_channel.id,
             "announce_channel_id": announce_channel.id,
             "announce_role_id": birthday_role.id if birthday_role else None,
+            "ping_role_id": ping_role.id if ping_role else None,
         })
         embed = base_embed(title=f"{GIFT} Birthday System Configured!", color=FREE_COLOR, ctx=ctx)
         embed.add_field(name="📥 Intro Channel", value=intro_channel.mention, inline=True)
         embed.add_field(name="📢 Announce Channel", value=announce_channel.mention, inline=True)
         embed.add_field(name="🎭 Birthday Role", value=birthday_role.mention if birthday_role else "None", inline=True)
+        embed.add_field(name="🔔 Ping Role", value=ping_role.mention if ping_role else "None", inline=True)
         embed.add_field(name=f"{INFO} Auto-detected from intros", value="Name • Birthday • Age • Pronouns", inline=False)
         tier = f"{CROWN} Premium active" if await self.is_premium(ctx.guild.id) else f"{LOCK} Free tier — see `/birthdayhelp` to compare"
         embed.add_field(name="💎 Tier", value=tier, inline=False)
