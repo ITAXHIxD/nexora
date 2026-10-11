@@ -601,17 +601,24 @@ class BirthdayWishPickerView(discord.ui.View):
 class BirthdayWishTypeSelect(discord.ui.Select):
     def __init__(self, picker: BirthdayWishPickerView):
         self.picker = picker
-        options = [
-            discord.SelectOption(label=label, value=key, description=message[:100], emoji=emoji)
-            for key, (label, message, emoji) in [
-                ("sweet", *BIRTHDAY_WISH_PRESETS["sweet"], "💛"),
-                ("funny", *BIRTHDAY_WISH_PRESETS["funny"], "😂"),
-                ("heartfelt", *BIRTHDAY_WISH_PRESETS["heartfelt"], "💖"),
-                ("friendly", *BIRTHDAY_WISH_PRESETS["friendly"], "🥳"),
-                ("playful", *BIRTHDAY_WISH_PRESETS["playful"], "🎉"),
-                ("short", *BIRTHDAY_WISH_PRESETS["short"], "🎂"),
-            ]
-        ]
+        options = []
+        for key, emoji in [
+            ("sweet", "💛"),
+            ("funny", "😂"),
+            ("heartfelt", "💖"),
+            ("friendly", "🥳"),
+            ("playful", "🎉"),
+            ("short", "🎂"),
+        ]:
+            label, message = BIRTHDAY_WISH_PRESETS[key]
+            options.append(
+                discord.SelectOption(
+                    label=label,
+                    value=key,
+                    description=message[:100],
+                    emoji=emoji,
+                )
+            )
         options.append(
             discord.SelectOption(
                 label="Write my own",
