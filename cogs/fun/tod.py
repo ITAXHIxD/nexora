@@ -205,7 +205,12 @@ DARES = {
         "Send a friend a ridiculous pickup line and ask them to grade the delivery. Improve it based on their feedback.",
         "Speak for 90 seconds about something you genuinely care about while the challenger tries harmless distractions.",
         "Create a fake award for yourself based on a real weakness and deliver a 45-second acceptance speech.",
-        "Answer three follow-up questions from the challenger about something you avoid, a pattern you repeat, and a lesson you haven't learned."
+        "Answer three follow-up questions from the challenger about something you avoid, a pattern you repeat, and a lesson you haven't learned.",
+        "DM a friend a fake corporate memo announcing that they have been promoted to Chief Executive of Chaos. Include three absurd job responsibilities.",
+        "Call or voice-message a willing friend and ask them to settle a real, harmless disagreement. You must accept their ruling for the rest of the game.",
+        "Ask a friend which of your habits would make the funniest reality-show storyline, then pitch the first episode in 45 seconds.",
+        "Send a friend a 15-second voice note trying to sell them on the worst possible holiday destination. Make it sound genuinely luxurious.",
+        "Let the challenger select a common opinion. Record a 60-second voice note defending the opposite view as if your reputation depends on it."
     ],
     "spicy": [
         "If you're comfortable, DM someone you genuinely like a low-pressure opener or honest compliment. No fake emergency and no demand for a reply.",
