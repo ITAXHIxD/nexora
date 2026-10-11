@@ -497,6 +497,8 @@ class BirthdayIntro(commands.Cog):
         self.scol = None
         self.user_store_path = os.path.join("data", "birthday_data.json")
         self.settings_store_path = os.path.join("data", "birthday_settings.json")
+        self._startup_birthday_check_started = False
+        self._birthday_check_lock = asyncio.Lock()
 
     async def cog_load(self):
         mongo = getattr(self.bot, "mongo_db", None)
@@ -507,6 +509,7 @@ class BirthdayIntro(commands.Cog):
             logger.warning("%s: mongo_db unavailable", self.__class__.__name__)
         if self.bot.is_ready():
             self._ensure_daily_check_running()
+            self._start_startup_birthday_check()
         logger.info("%s ready", self.__class__.__name__)
 
     async def cog_unload(self):
@@ -652,13 +655,35 @@ class BirthdayIntro(commands.Cog):
 
     @tasks.loop(time=datetime.time(hour=9, minute=0, tzinfo=datetime.timezone.utc))
     async def daily_check(self):
+        await self._run_birthday_check()
+
+    def _start_startup_birthday_check(self):
+        """Schedule one birthday scan after the bot becomes ready."""
+        if self._startup_birthday_check_started:
+            return
+        self._startup_birthday_check_started = True
+        asyncio.create_task(self._startup_birthday_check())
+
+    async def _startup_birthday_check(self):
+        await self.bot.wait_until_ready()
+        try:
+            await self._run_birthday_check()
+            logger.info("Startup birthday check completed")
+        except Exception:
+            logger.exception("Startup birthday check failed")
+
+    async def _run_birthday_check(self):
+        # Serialize the startup scan with the scheduled daily scan.
+        async with self._birthday_check_lock:
+            await self._process_birthdays()
+
+    async def _process_birthdays(self):
         now = datetime.datetime.now(datetime.timezone.utc)
         async for doc in self.iter_birthdays():
             if not is_today(doc["month"], doc["day"]):
                 continue
             if doc.get("last_notified_year") == now.year:
                 continue
-            await self.upsert_user(doc["_id"], doc["guild_id"], {"last_notified_year": now.year})
 
             guild = self.bot.get_guild(doc.get("guild_id", 0))
             if not guild:
@@ -706,9 +731,32 @@ class BirthdayIntro(commands.Cog):
             embed.set_footer(text=f"{guild.name} • Birthday System")
 
             try:
-                await send_ui(channel, view=WishView(self, uid=doc["_id"], guild_id=guild.id, title=f"{CAKE} Happy Birthday, {display}! {CAKE}", description=desc, color=TODAY_COLOR))
-            except discord.Forbidden:
-                pass
+                await send_ui(
+                    channel,
+                    view=WishView(
+                        self,
+                        uid=doc["_id"],
+                        guild_id=guild.id,
+                        title=f"{CAKE} Happy Birthday, {display}! {CAKE}",
+                        description=desc,
+                        color=TODAY_COLOR,
+                    ),
+                )
+            except discord.HTTPException as exc:
+                logger.warning(
+                    "Birthday announcement failed for user %s in guild %s: %s",
+                    doc["_id"],
+                    guild.id,
+                    exc,
+                )
+                # Do not mark this year as notified; a later check can retry.
+                continue
+
+            # Mark only after the primary announcement succeeds. This prevents
+            # a missing channel or Discord send failure from suppressing retries.
+            await self.upsert_user(
+                doc["_id"], guild.id, {"last_notified_year": now.year}
+            )
 
             if doc.get("scope") == "mutual" and await self.is_premium(guild.id):
                 for og in self.bot.guilds:
@@ -739,6 +787,7 @@ class BirthdayIntro(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         self._ensure_daily_check_running()
+        self._start_startup_birthday_check()
 
     async def _drop_role(self, member, role, delay=86400):
         await asyncio.sleep(delay)
