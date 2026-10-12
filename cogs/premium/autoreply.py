@@ -30,6 +30,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from utils.premium_storage import load_premium_data, save_premium_data
+
 from utils.ui import (
     BRAND_COLOR,
     PREMIUM_COLOR,
@@ -47,7 +49,8 @@ class AutoResponder(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self._user_cooldowns: Dict[int, float] = {}
+        # Cool down per guild + user, rather than suppressing that member in all servers.
+        self._user_cooldowns: Dict[tuple[int, int], float] = {}
 
     def _get_col(self):
         db = getattr(self.bot, "mongo_db", None)
@@ -55,34 +58,114 @@ class AutoResponder(commands.Cog):
 
     async def _is_premium(self, guild_id: int) -> bool:
         checker = getattr(self.bot, "is_premium_guild", None)
-        if checker:
-            return await checker(guild_id)
-        return False
+        if not callable(checker):
+            return False
+        try:
+            result = checker(guild_id)
+            if hasattr(result, "__await__"):
+                result = await result
+            return bool(result)
+        except Exception as exc:
+            logger.warning("Auto-responder premium check failed for guild %s: %s", guild_id, exc)
+            return False
 
     async def _get_tier_limit(self, guild_id: int) -> int:
         tier_getter = getattr(self.bot, "get_premium_tier", None)
         tier = await tier_getter(guild_id) if tier_getter else "FREE"
+        tier = str(tier or "FREE").upper()
+
         cfg_getter = getattr(self.bot, "get_tier_config", None)
         cfg = cfg_getter(tier) if cfg_getter else {}
-        return cfg.get("features", {}).get("custom_responses", 0)
+        features = cfg.get("features", {}) if isinstance(cfg, dict) else {}
+        value = features.get("custom_responses") if isinstance(features, dict) else None
+        if value is None:
+            value = {
+                "FREE": 0, "BASIC": 10, "PRO": 30,
+                "ENTERPRISE": -1, "CUSTOM": -1, "GRANDFATHERED": -1,
+            }.get(tier, 0)
+        if isinstance(value, bool):
+            return 10 if value else 0
+        try:
+            limit = int(value)
+        except (TypeError, ValueError):
+            return 0
+        return limit if limit == -1 or limit >= 0 else 0
+
+    def _get_local_replies(self, guild_id: int) -> List[dict]:
+        data = load_premium_data()
+        subscription = data.get("subscriptions", {}).get(str(guild_id), {})
+        if not isinstance(subscription, dict):
+            return []
+        replies = subscription.get("custom_replies", [])
+        return replies if isinstance(replies, list) else []
+
+    def _save_local_replies(self, guild_id: int, replies: List[dict]) -> None:
+        data = load_premium_data()
+        subscriptions = data.setdefault("subscriptions", {})
+        key = str(guild_id)
+        subscription = subscriptions.get(key)
+        if not isinstance(subscription, dict):
+            subscription = {}
+        subscription["custom_replies"] = replies
+        subscriptions[key] = subscription
+        save_premium_data(data)
 
     async def _get_replies(self, guild_id: int) -> List[dict]:
         col = self._get_col()
-        if col is None:
-            return []
-        doc = await col.find_one({"_id": guild_id})
-        if not doc:
-            return []
-        return doc.get("custom_replies", [])
+        if col is not None:
+            try:
+                doc = await col.find_one({"_id": int(guild_id)})
+                if isinstance(doc, dict) and isinstance(doc.get("custom_replies"), list):
+                    return doc["custom_replies"]
+            except Exception as exc:
+                logger.warning("Auto-responder Mongo read failed; using local fallback: %s", exc)
+        return self._get_local_replies(guild_id)
+
+    async def _save_replies(self, guild_id: int, replies: List[dict]) -> None:
+        col = self._get_col()
+        if col is not None:
+            try:
+                await col.update_one({"_id": int(guild_id)}, {"$set": {"custom_replies": replies}}, upsert=True)
+                return
+            except Exception as exc:
+                logger.warning("Auto-responder Mongo write failed; saving locally: %s", exc)
+        self._save_local_replies(guild_id, replies)
+
+    async def _record_hit(self, guild_id: int, reply_id: str) -> None:
+        col = self._get_col()
+        if col is not None:
+            try:
+                await col.update_one(
+                    {"_id": int(guild_id), "custom_replies.id": reply_id},
+                    {"$inc": {"custom_replies.$.hits": 1}},
+                )
+                return
+            except Exception as exc:
+                logger.debug("Auto-responder hit counter update failed: %s", exc)
+        replies = self._get_local_replies(guild_id)
+        for item in replies:
+            if item.get("id") == reply_id:
+                item["hits"] = int(item.get("hits", 0)) + 1
+                break
+        self._save_local_replies(guild_id, replies)
 
     def _format_reply(self, template: str, message: discord.Message) -> str:
+        guild = message.guild
+        replacements = {
+            "{user.mention}": message.author.mention,
+            "{user}": message.author.display_name,
+            "{user.id}": str(message.author.id),
+            "{server}": guild.name,
+            "{guild.id}": str(guild.id),
+            "{channel}": message.channel.mention,
+            "{channel.id}": str(message.channel.id),
+            "{members}": str(guild.member_count or len(guild.members)),
+            "{created_at}": discord.utils.format_dt(message.created_at, style="R"),
+        }
         text = template
-        text = text.replace("{user.mention}", message.author.mention)
-        text = text.replace("{user}", message.author.display_name)
-        text = text.replace("{server}", message.guild.name)
-        text = text.replace("{channel}", message.channel.mention)
-        text = text.replace("{members}", str(message.guild.member_count))
-        return text
+        for token in sorted(replacements, key=len, reverse=True):
+            text = text.replace(token, replacements[token])
+        return text[:1997] + "..." if len(text) > 2000 else text
 
     # ── Listener for Automatic Response ───────────────────────────────────────
 
@@ -91,55 +174,67 @@ class AutoResponder(commands.Cog):
         if message.author.bot or not message.guild:
             return
 
-        # Avoid triggering on bot command prefix
-        prefix = getattr(self.bot, "command_prefix", "n!")
-        if isinstance(prefix, str) and message.content.startswith(prefix):
-            return
+        # Resolve real prefix rules (including callable and mention-based prefixes).
+        try:
+            ctx = await self.bot.get_context(message)
+            if ctx.valid:
+                return
+        except Exception as exc:
+            logger.debug("Auto-responder command detection failed: %s", exc)
 
         if not await self._is_premium(message.guild.id):
             return
 
         replies = await self._get_replies(message.guild.id)
-        if not replies:
+        content_clean = message.content.casefold().strip()
+        if not replies or not content_clean:
             return
 
-        # Anti-spam cooldown per user (3 seconds)
-        now = datetime.now(timezone.utc).timestamp()
-        last_time = self._user_cooldowns.get(message.author.id, 0)
-        if now - last_time < 3.0:
-            return
-
-        content_clean = message.content.lower().strip()
-        matched_reply = None
-
+        matches = []
+        priorities = {"exact": 3, "startswith": 2, "contains": 1}
         for item in replies:
-            trigger = item.get("trigger", "").lower().strip()
-            mode = item.get("match_mode", "contains")
+            trigger = str(item.get("trigger", "")).casefold().strip()
+            mode = str(item.get("match_mode", "contains")).casefold()
+            if not trigger or mode not in priorities:
+                continue
+            matched = (
+                (mode == "exact" and content_clean == trigger)
+                or (mode == "startswith" and content_clean.startswith(trigger))
+                or (mode == "contains" and trigger in content_clean)
+            )
+            if matched:
+                # Prefer exact matches, then prefix matches, then substring matches.
+                matches.append((priorities[mode], len(trigger), item))
 
-            if mode == "exact" and content_clean == trigger:
-                matched_reply = item
-                break
-            elif mode == "startswith" and content_clean.startswith(trigger):
-                matched_reply = item
-                break
-            elif mode == "contains" and trigger in content_clean:
-                matched_reply = item
-                break
+        if not matches:
+            return
 
-        if matched_reply:
-            self._user_cooldowns[message.author.id] = now
-            formatted_text = self._format_reply(matched_reply["reply"], message)
-            try:
-                await message.channel.send(formatted_text)
-                # Increment hit counter
-                col = self._get_col()
-                if col:
-                    await col.update_one(
-                        {"_id": message.guild.id, "custom_replies.id": matched_reply.get("id")},
-                        {"$inc": {"custom_replies.$.hits": 1}},
-                    )
-            except Exception as e:
-                logger.debug("Auto-reply dispatch error: %s", e)
+        now = datetime.now(timezone.utc).timestamp()
+        cooldown_key = (message.guild.id, message.author.id)
+        if now - self._user_cooldowns.get(cooldown_key, 0.0) < 3.0:
+            return
+
+        _, _, matched_reply = max(matches, key=lambda item: (item[0], item[1]))
+        formatted = self._format_reply(str(matched_reply.get("reply", "")), message)
+        if not formatted.strip():
+            return
+
+        try:
+            await message.channel.send(
+                formatted,
+                allowed_mentions=discord.AllowedMentions(
+                    everyone=False, roles=False, users=True, replied_user=False
+                ),
+            )
+            self._user_cooldowns[cooldown_key] = now
+            await self._record_hit(message.guild.id, str(matched_reply.get("id", "")))
+        except discord.Forbidden:
+            logger.warning(
+                "Auto-responder cannot send in channel %s (guild %s)",
+                message.channel.id, message.guild.id
+            )
+        except discord.HTTPException as exc:
+            logger.warning("Auto-responder failed to send: %s", exc)
 
     # ── Hybrid Custom Reply Group ─────────────────────────────────────────────
 
