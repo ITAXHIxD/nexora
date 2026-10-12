@@ -115,7 +115,9 @@ class AutoResponder(commands.Cog):
         if col is not None:
             try:
                 doc = await col.find_one({"_id": int(guild_id)})
-                if isinstance(doc, dict) and isinstance(doc.get("custom_replies"), list):
+                # Only use the Mongo document's list when it is attached to a
+                # premium record. A bare upsert must not shadow local entitlement.
+                if isinstance(doc, dict) and doc.get("tier") and isinstance(doc.get("custom_replies"), list):
                     return doc["custom_replies"]
             except Exception as exc:
                 logger.warning("Auto-responder Mongo read failed; using local fallback: %s", exc)
@@ -125,8 +127,12 @@ class AutoResponder(commands.Cog):
         col = self._get_col()
         if col is not None:
             try:
-                await col.update_one({"_id": int(guild_id)}, {"$set": {"custom_replies": replies}}, upsert=True)
-                return
+                # Do not upsert a partial document that hides a local premium grant
+                # or overwrites the server's tier metadata.
+                doc = await col.find_one({"_id": int(guild_id)})
+                if isinstance(doc, dict) and doc.get("tier"):
+                    await col.update_one({"_id": int(guild_id)}, {"$set": {"custom_replies": replies}})
+                    return
             except Exception as exc:
                 logger.warning("Auto-responder Mongo write failed; saving locally: %s", exc)
         self._save_local_replies(guild_id, replies)
@@ -135,11 +141,12 @@ class AutoResponder(commands.Cog):
         col = self._get_col()
         if col is not None:
             try:
-                await col.update_one(
+                result = await col.update_one(
                     {"_id": int(guild_id), "custom_replies.id": reply_id},
                     {"$inc": {"custom_replies.$.hits": 1}},
                 )
-                return
+                if getattr(result, "matched_count", 0):
+                    return
             except Exception as exc:
                 logger.debug("Auto-responder hit counter update failed: %s", exc)
         replies = self._get_local_replies(guild_id)
