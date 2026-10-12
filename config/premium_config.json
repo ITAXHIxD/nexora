@@ -14,7 +14,9 @@
         "embed_studio": false,
         "server_analytics": false,
         "priority_support": false,
-        "message_history": 10
+        "message_history": 10,
+        "auto_moderation": false,
+        "scheduled_messages": false
       },
       "limits": {
         "api_calls_per_day": 100,
@@ -36,7 +38,9 @@
         "embed_studio": true,
         "server_analytics": true,
         "priority_support": true,
-        "message_history": 25
+        "message_history": 25,
+        "auto_moderation": false,
+        "scheduled_messages": false
       },
       "limits": {
         "api_calls_per_day": 500,
@@ -58,7 +62,9 @@
         "embed_studio": true,
         "server_analytics": true,
         "priority_support": true,
-        "message_history": 50
+        "message_history": 50,
+        "auto_moderation": true,
+        "scheduled_messages": true
       },
       "limits": {
         "api_calls_per_day": 1500,
@@ -80,7 +86,9 @@
         "embed_studio": true,
         "server_analytics": true,
         "priority_support": true,
-        "message_history": 100
+        "message_history": 100,
+        "auto_moderation": true,
+        "scheduled_messages": true
       },
       "limits": {
         "api_calls_per_day": -1,
@@ -102,7 +110,14 @@
         "embed_studio": true,
         "server_analytics": true,
         "priority_support": true,
-        "message_history": 100
+        "message_history": 100,
+        "auto_moderation": true,
+        "scheduled_messages": true,
+        "voice_support": true,
+        "image_generation": true,
+        "music_integration": true,
+        "web_dashboard": true,
+        "early_access": true
       },
       "limits": {
         "api_calls_per_day": -1,
@@ -128,11 +143,14 @@
         "embed_studio": true,
         "server_analytics": true,
         "priority_support": true,
-        "message_history": 100
+        "message_history": 100,
+        "auto_moderation": true,
+        "scheduled_messages": true
       },
       "limits": {
         "api_calls_per_day": -1,
-        "response_priority": 0
+        "response_priority": 0,
+        "response_time_priority": 0
       }
     }
   },
