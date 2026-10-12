@@ -1341,7 +1341,10 @@ class Premium(commands.Cog):
         else:
             self.bot.premium_guild_ids.discard(gid)
             self.bot.premium_guild_tiers.pop(gid, None)
-        await ctx.send(f"Set server premium for {gid} to {tier} ({'Permanent' if days == -1 or tier == 'GRANDFATHERED' else f'{days} days'}).")
+        result = f"Set server premium for {gid} to {tier} ({'Permanent' if days == -1 or tier == 'GRANDFATHERED' else f'{days} days'})."
+        if self.col_server is None:
+            result += "\\n\\nWarning: MongoDB is not connected. The entitlement is saved locally, but database-backed perks such as vanity roles, booster roles, and auto-responder settings need MongoDB to be available."
+        await ctx.send(result)
 
     @app_commands.command(name="premium_grant", description="Grant Server Premium to a Discord server (bot owner only)")
     @app_commands.describe(
