@@ -485,7 +485,7 @@ class ServerControlHubView(discord.ui.View):
     def get_overview_embed(self) -> discord.Embed:
         g = self.guild
         cfg = self.cfg
-        is_active = self.tier in PAID_SERVER_TIERS and not _is_expired(self.doc)
+        is_active = self.tier in PAID_SERVER_TIERS and (self.tier == "GRANDFATHERED" or not _is_expired(self.doc))
 
         embed = discord.Embed(
             title=f"{cfg['emoji']} {g.name} · Server Premium Status",
@@ -765,6 +765,18 @@ class Premium(commands.Cog):
                 if not doc:
                     doc = await self.col_server.find_one({"_id": str(gid)})
                 if doc:
+                    # Some premium feature writes historically created partial
+                    # Mongo documents without a tier. Merge the saved entitlement
+                    # back in instead of accidentally downgrading that server to Free.
+                    if not doc.get("tier"):
+                        local_doc = self._get_local_server_doc(gid)
+                        if local_doc.get("tier"):
+                            merged = {**local_doc, **doc}
+                            merged["tier"] = local_doc["tier"]
+                            merged["expires_at"] = local_doc.get("expires_at")
+                            merged.setdefault("purchased_by", local_doc.get("purchased_by"))
+                            merged.setdefault("purchased_at", local_doc.get("purchased_at"))
+                            return merged
                     return doc
             except Exception as exc:
                 logger.warning("Premium lookup failed; trying local JSON fallback: %s", exc)
@@ -1221,7 +1233,7 @@ class Premium(commands.Cog):
         if days != -1 and days < 1:
             return await ctx.send("Duration must be at least 1 day, or -1 for permanent.")
 
-        expires = None if days == -1 else utcnow() + timedelta(days=days)
+        expires = None if days == -1 or tier == "GRANDFATHERED" else utcnow() + timedelta(days=days)
         metadata = {
             "purchased_by": ctx.author.id,
             "purchased_at": utcnow().isoformat(),
