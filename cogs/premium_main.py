@@ -1237,10 +1237,11 @@ class Premium(commands.Cog):
                     upsert=True,
                 )
             except Exception as exc:
-                logger.warning("Premium grant failed in MongoDB; keeping a local fallback: %s", exc)
+                logger.error("Premium grant failed in MongoDB: %s", exc)
+                return await ctx.send("MongoDB could not save the premium grant. No grant was reported as successful.")
 
         try:
-            # Mirror entitlement state locally so premium gates remain reliable during outages.
+            # Mirror entitlement state locally so it survives a later short database outage.
             self._save_local_server_subscription(gid, tier, expires, **metadata)
         except Exception as exc:
             if self.col_server is None:
