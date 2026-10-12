@@ -54,6 +54,16 @@ UNSAFE_VANITY_WEBHOOK_FIELDS = (
 OWNER_ID = 1013851779886231685
 YEARLY_DISCOUNT = 20  # 20% annual discount
 
+
+async def _is_nexora_owner(interaction: discord.Interaction) -> bool:
+    """Application-command owner check compatible with the installed discord.py."""
+    if interaction.user.id == OWNER_ID:
+        return True
+    try:
+        return await interaction.client.is_owner(interaction.user)
+    except Exception:
+        return False
+
 # ══════════════════════════════════════════════════════════════════
 # SERVER PREMIUM CONFIGURATION
 # ══════════════════════════════════════════════════════════════════
@@ -1359,7 +1369,7 @@ class Premium(commands.Cog):
         app_commands.Choice(name="Custom", value="CUSTOM"),
         app_commands.Choice(name="Grandfathered (Lifetime)", value="GRANDFATHERED"),
     ])
-    @app_commands.checks.is_owner()
+    @app_commands.check(_is_nexora_owner)
     async def premium_grant_slash(
         self,
         interaction: discord.Interaction,
