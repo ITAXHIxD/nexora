@@ -299,26 +299,31 @@ class AutoResponder(commands.Cog):
         if limit != -1 and len(replies) >= limit:
             return await ctx.send(f"❌ **Slot Limit Reached**: Your current tier allows up to `{limit}` auto-responders. Use `/premium_price` to upgrade!", ephemeral=True)
 
-        clean_trigger = trigger.lower().strip()
-        # Check duplicate
-        if any(r.get("trigger", "").lower() == clean_trigger for r in replies):
-            return await ctx.send(f"❌ An auto-responder for `{clean_trigger}` already exists! Delete it first if you want to replace it.", ephemeral=True)
+        clean_trigger = trigger.casefold().strip()
+        clean_reply = reply.strip()
+        mode = str(match_mode or "contains").casefold().strip()
 
-        col = self._get_col()
-        if col is None:
-            return await ctx.send("❌ Database unavailable.", ephemeral=True)
+        if not clean_trigger or len(clean_trigger) > 100:
+            return await ctx.send("Trigger must contain 1–100 characters.", ephemeral=True)
+        if not clean_reply or len(clean_reply) > 1800:
+            return await ctx.send("Reply must contain 1–1,800 characters.", ephemeral=True)
+        if mode not in {"contains", "exact", "startswith"}:
+            return await ctx.send("Match mode must be contains, exact, or startswith.", ephemeral=True)
+
+        if any(str(item.get("trigger", "")).casefold().strip() == clean_trigger for item in replies):
+            return await ctx.send(f"An auto-responder for {clean_trigger!r} already exists. Delete it first to replace it.", ephemeral=True)
 
         new_entry = {
             "id": str(uuid.uuid4())[:8],
             "trigger": clean_trigger,
-            "reply": reply.strip(),
-            "match_mode": match_mode or "contains",
+            "reply": clean_reply,
+            "match_mode": mode,
             "created_by": ctx.author.id,
-            "created_at": datetime.now(timezone.utc),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "hits": 0,
         }
-
-        await col.update_one({"_id": ctx.guild.id}, {"$push": {"custom_replies": new_entry}}, upsert=True)
+        replies.append(new_entry)
+        await self._save_replies(ctx.guild.id, replies)
 
         embed = discord.Embed(
             title="✅ Auto-Responder Created",
@@ -326,8 +331,8 @@ class AutoResponder(commands.Cog):
             color=SUCCESS_COLOR,
         )
         embed.add_field(name="Trigger Keyword", value=f"`{clean_trigger}`", inline=True)
-        embed.add_field(name="Match Mode", value=f"`{match_mode}`", inline=True)
-        embed.add_field(name="Response Template", value=f"\"{reply.strip()}\"", inline=False)
+        embed.add_field(name="Match Mode", value=f"`{mode}`", inline=True)
+        embed.add_field(name="Response Template", value=f"\"{clean_reply}\"", inline=False)
         embed.set_footer(text=f"Slots Remaining: {'Unlimited' if limit == -1 else limit - len(replies) - 1}")
         await ctx.send(embed=embed)
 
@@ -339,26 +344,29 @@ class AutoResponder(commands.Cog):
         if not await self._is_premium(ctx.guild.id):
             return await ctx.send("❌ **Premium Required**.", ephemeral=True)
 
-        col = self._get_col()
-        if col is None:
-            return await ctx.send("❌ Database unavailable.", ephemeral=True)
+        clean_trigger = trigger.casefold().strip()
+        replies = await self._get_replies(ctx.guild.id)
+        updated = [
+            item for item in replies
+            if str(item.get("trigger", "")).casefold().strip() != clean_trigger
+        ]
+        if len(updated) == len(replies):
+            return await ctx.send(f"No auto-responder found for {clean_trigger!r}.", ephemeral=True)
 
-        clean_trigger = trigger.lower().strip()
-        res = await col.update_one(
-            {"_id": ctx.guild.id},
-            {"$pull": {"custom_replies": {"trigger": clean_trigger}}},
-        )
-        if res.modified_count == 0:
-            return await ctx.send(f"❌ No auto-responder found matching trigger `{clean_trigger}`.", ephemeral=True)
-
-        await ctx.send(f"✅ Removed auto-responder for `{clean_trigger}`.")
+        await self._save_replies(ctx.guild.id, updated)
+        await ctx.send(f"Removed auto-responder for {clean_trigger!r}.")
 
     @custom_reply.command(name="test", description="Test how an auto-responder formats variables")
     @commands.guild_only()
     @app_commands.describe(trigger="Trigger to test")
     async def reply_test(self, ctx: commands.Context, trigger: str):
+        if not await self._is_premium(ctx.guild.id):
+            return await ctx.send("Premium is required to test custom auto-responders.", ephemeral=True)
+        if not ctx.author.guild_permissions.manage_guild:
+            return await ctx.send("You need Manage Server permission to test auto-responders.", ephemeral=True)
+
         replies = await self._get_replies(ctx.guild.id)
-        clean_trigger = trigger.lower().strip()
+        clean_trigger = trigger.casefold().strip()
         matched = None
         for r in replies:
             if r.get("trigger") == clean_trigger:
