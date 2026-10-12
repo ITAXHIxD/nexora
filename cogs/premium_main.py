@@ -523,6 +523,8 @@ class ServerControlHubView(discord.ui.View):
         embed.add_field(name="👤 Owner / Buyer", value=buyer_str, inline=True)
         embed.add_field(name="📅 Activated On", value=purchased_at_str, inline=True)
         embed.add_field(name="⏳ Expiration", value=_fmt_expiry(self.doc), inline=False)
+        storage_state = "MongoDB connected" if self.cog.col_server is not None else "Local entitlement only; feature settings require MongoDB"
+        embed.add_field(name="Premium Storage", value=storage_state, inline=False)
 
         embed.set_footer(text=f"Requested by {self.requester.display_name} · Nexora Dual-Tier Ecosystem", icon_url=self.requester.display_avatar.url)
         return embed
@@ -1002,7 +1004,7 @@ class Premium(commands.Cog):
     # COMMANDS
     # ══════════════════════════════════════════════════════════════
 
-    @commands.hybrid_group(name="premium", description="View server premium status or personal user VIP dashboard", fallback="status")
+    @commands.group(name="premium", invoke_without_command=True, description="View Server Premium or personal User VIP")
     async def premium_cmd(self, ctx: commands.Context):
         """View server premium status by default."""
         if not ctx.guild:
@@ -1060,6 +1062,58 @@ class Premium(commands.Cog):
         )
         embed.set_footer(text="Nexora VIP Network · Powering your Discord experience")
         await ctx.send(embed=embed)
+
+
+    @app_commands.command(name="premium", description="View Server Premium status or personal User VIP")
+    @app_commands.choices(view=[
+        app_commands.Choice(name="Server Premium", value="server"),
+        app_commands.Choice(name="Personal User VIP", value="user"),
+    ])
+    @app_commands.describe(view="Choose a dashboard; Server Premium is the default")
+    async def premium_slash(self, interaction: discord.Interaction, view: str = "server"):
+        """Standalone /premium command; prefix commands remain n!premium server/user."""
+        if view == "user":
+            doc = await self.get_user_doc(interaction.user.id)
+            tier = str(doc.get("tier", "FREE") or "FREE").upper()
+            if _is_expired(doc):
+                tier = "FREE"
+            cfg = USER_TIERS.get(tier, USER_TIERS["FREE"])
+            embed = discord.Embed(
+                title=f"Personal VIP Dashboard - {interaction.user.display_name}",
+                color=cfg["color"],
+                timestamp=utcnow(),
+            )
+            embed.set_thumbnail(url=interaction.user.display_avatar.url)
+            is_vip = tier in PAID_USER_TIERS and not _is_expired(doc)
+            embed.description = (
+                f"Status: {'Active ' + cfg['display_name'] if is_vip else 'Standard Free User'}\n"
+                "Personal VIP perks apply anywhere Nexora is present."
+            )
+            feats = cfg["features"]
+            custom_color = doc.get("custom_color")
+            color_str = f"#{custom_color:06X}" if custom_color else "Default"
+            passes = doc.get("server_passes", feats.get("server_passes", 0))
+            embed.add_field(name="Custom Embed Color", value=color_str, inline=True)
+            embed.add_field(name="Max Reminders", value=str(feats.get("max_reminders", 5)), inline=True)
+            embed.add_field(name="Server Passes", value=str(passes), inline=True)
+            embed.add_field(name="Subscription Expiry", value=_fmt_expiry(doc), inline=False)
+            embed.add_field(
+                name="VIP Actions",
+                value="/vip color <hex>\n/vip badge\n/vip pass <guild_id>",
+                inline=False,
+            )
+            embed.set_footer(text="Nexora VIP Network")
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        if interaction.guild is None:
+            return await interaction.response.send_message(
+                "Use the user dashboard option in /premium to view personal VIP, or /premium_price for plans.",
+                ephemeral=True,
+            )
+
+        doc = await self.get_server_doc(interaction.guild.id)
+        panel = ServerControlHubView(self, interaction.guild, doc, interaction.user)
+        await interaction.response.send_message(embed=panel.get_overview_embed(), view=panel)
 
     @commands.hybrid_command(name="premium_price", description="View Server Premium and User VIP plans and pricing calculator", aliases=["plans", "upgrade"])
     async def premium_price(self, ctx: commands.Context):
