@@ -360,7 +360,11 @@ class TODView(NexoraView):
         else:
             unused = [item for item in pool if (p_type, item) not in self.used_prompts]
             if not unused:
-                # Only recycle after every prompt in this rating/type has appeared.
+                # Start a fresh cycle only after every prompt in this rating/type
+                # has appeared, while keeping the just-finished cycle isolated.
+                self.used_prompts = {
+                    entry for entry in self.used_prompts if entry[0] != p_type
+                }
                 unused = list(pool)
             self.current_prompt = random.choice(unused)
         self.used_prompts.add((p_type, self.current_prompt))
