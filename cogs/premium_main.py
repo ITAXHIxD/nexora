@@ -1268,7 +1268,7 @@ class Premium(commands.Cog):
         else:
             self.bot.premium_guild_ids.discard(gid)
             self.bot.premium_guild_tiers.pop(gid, None)
-        await ctx.send(f"Set server premium for {gid} to {tier} ({'Permanent' if days == -1 else f'{days} days'}).")
+        await ctx.send(f"Set server premium for {gid} to {tier} ({'Permanent' if days == -1 or tier == 'GRANDFATHERED' else f'{days} days'}).")
 
     @commands.command(name="set_user_vip")
     @commands.is_owner()
