@@ -1460,7 +1460,7 @@ class Premium(commands.Cog):
             try:
                 await self.col_server.update_one(
                     {"_id": gid},
-                    {"$set": {"tier": "FREE", "expires_at": now}},
+                    {"$set": {"tier": "FREE", "expires_at": now, "revoked_at": now.isoformat()}},
                     upsert=True,
                 )
             except Exception as exc:
