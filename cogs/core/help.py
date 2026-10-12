@@ -663,9 +663,12 @@ COMMAND_DATA = {
         ],
         "notes": [
             "Use `/truth` or `/dare` to start with only one type of prompt, or use this combined command",
-            "Content tiers: `pg` (Warm-Up), `teen` (Chaos), and `spicy` (bold/flirty); the default tier is `teen`",
-            "Interactive controls include Truth, Dare, Random, and Reroll, so you can keep the session going",
-            "Play solo or challenge a friend; multiplayer challenges include response/forfeit controls",
+            "All three tiers—`pg` (Warm-Up), `teen` (Chaos), and `spicy` (bold/flirty)—contain **100+ unique truths AND 100+ unique dares each**",
+            "Prompt variety covers everyday life, humour, creativity, habits, friendships, confidence, social situations, boundaries, and romance—not relationships alone",
+            "Prompts do not repeat in the same session until that rating/type pool has been exhausted",
+            "Interactive controls include Truth, Dare, Random, Switch, Another Prompt, Reroll, Complete, and Forfeit",
+            "Play solo or challenge a friend; multiplayer challenges include turn notifications and response/forfeit controls",
+            "Spicy prompts stay bold and flirty rather than explicit; players can pass or reroll if a prompt feels uncomfortable",
         ],
         "related": ["truth", "dare", "wyr", "meme", "rps"],
     },
@@ -1568,16 +1571,32 @@ COMMAND_DATA = {
         "category": "premium",
         "premium": True,
         "admin": True,
-        "description": "Smart automated keyword responders with dynamic variables",
-        "usage": ["n!custom_reply [add|delete|list|test]", "/custom_reply [add|delete|list|test]"],
-        "examples": ["/custom_reply add trigger:.store reply:Check out our shop at https://example.com!", "/custom_reply list"],
-        "notes": [
-            "👑 **Server Premium only** — Basic: 10, Pro: 30, Enterprise: Unlimited",
-            "Supports `{user}`, `{user.mention}`, `{server}`, `{channel}`, and `{members}` variables",
-            "Built-in per-user anti-spam cooldown protection",
-            "Requires **Manage Server** permission to configure",
+        "description": "Configure premium keyword auto-responses for this server",
+        "usage": [
+            "n!custom_reply",
+            "n!custom_reply add <trigger> <reply> [match_mode]",
+            "n!custom_reply delete <trigger>",
+            "n!custom_reply test <trigger>",
+            "/custom_reply",
+            "/custom_reply add <trigger> <reply> [match_mode]",
+            "/custom_reply delete <trigger>",
+            "/custom_reply test <trigger>",
         ],
-        "related": ["premium", "embed_studio"],
+        "examples": [
+            "/custom_reply",
+            "/custom_reply add trigger:hello reply:Hey {user.mention}! match_mode:exact",
+            "/custom_reply delete trigger:hello",
+            "/custom_reply test trigger:hello",
+        ],
+        "notes": [
+            "Requires active Server Premium; Manage Server permission is needed to add, delete, or test",
+            "Slot limits: Basic 10, Pro 30, Enterprise/Custom/Grandfathered unlimited; Free has no slots",
+            "Match modes: contains, exact, and startswith. Exact and longer, more specific triggers win over broad matches",
+            "Templates support {user}, {user.mention}, {user.id}, {server}, {guild.id}, {channel}, {channel.id}, {members}, and {created_at}",
+            "Responses use a per-member, per-server cooldown; bot messages and valid prefix commands do not trigger them",
+            "Settings persist in MongoDB with local JSON fallback when the database is unavailable",
+        ],
+        "related": ["premium", "premium_price", "embed_studio"],
     },
     "embed_studio": {
         "name": "embed_studio",
@@ -1856,8 +1875,10 @@ class HelpMainView(HelpLayoutView):
         whats_new = (
             "## ✨ What's New & Highlights\n"
             "• 📊 **Live Status & Telemetry:** Hardware and RAM metrics, network scale, gateway latency, game activity, and live presence tabs (`/status`, `/ping`).\n"
-            "• 🎭 **Truth & Dare Upgrade:** Separate `/truth` and `/dare` commands, plus classic `/tod`, with tougher prompts and Warm-Up, Chaos, and Spicy tiers.\n"
+            "• 🎭 **Truth & Dare Upgrade:** `/truth`, `/dare`, and `/tod` now use 100+ unique truths AND 100+ unique dares in each tier, with session-level no-repeat selection.\n"
             "• 🎮 **Multiplayer Game Updates:** Turn-based game alerts and match activity are surfaced in the Games & Fun section of the status dashboard.\n"
+            "• 🤖 **Premium Auto-Responders:** Tier-based quotas, correct prefix-command filtering, specific-match priority, richer template variables, and persistent storage fallback.\n"
+            "• 💎 **Server Premium Reliability:** Consistent tier limits, expiry-aware checks, owner grant/revoke validation, and local entitlement fallback.\n"
             "• 🎂 **Birthday Customization:** Automated birthday alerts and profiles, with separate editable normal-message and embed-card text (`/birthdaywish`).\n"
             "• 👑 **Vanity Roles Engine:** Automatic role grants synced to custom status keyword triggers with slot tiers (`/vanity`, `n!vanity_add`).\n"
             "• 🛡️ **Advanced Moderation & Logs:** Bans, kicks, mutes, tempbans, warnings, lockdowns, snipes, and audit log channels (`/ban`, `/mute`, `/serverlogs`).\n"
