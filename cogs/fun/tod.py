@@ -18,6 +18,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from cogs.fun.tod_prompts import EXTRA_TRUTHS, EXTRA_DARES
+
 from utils.ui import (
     BRAND_COLOR,
     ERROR_COLOR,
@@ -251,6 +253,28 @@ DARES = {
     ]
 }
 
+# Expand all six prompt pools and de-duplicate case-insensitively.
+# Keep the existing hand-written prompts first, then append fresh curated prompts.
+def _append_unique_prompts(existing: list[str], additions: list[str]) -> list[str]:
+    seen = {prompt.strip().casefold() for prompt in existing}
+    for prompt in additions:
+        clean = prompt.strip()
+        key = clean.casefold()
+        if clean and key not in seen:
+            existing.append(clean)
+            seen.add(key)
+    return existing
+
+
+for _tier in ("pg", "teen", "spicy"):
+    TRUTHS[_tier] = _append_unique_prompts(TRUTHS[_tier], EXTRA_TRUTHS[_tier])
+    DARES[_tier] = _append_unique_prompts(DARES[_tier], EXTRA_DARES[_tier])
+    if len(TRUTHS[_tier]) < 100 or len(DARES[_tier]) < 100:
+        raise RuntimeError(
+            f"Truth or Dare prompt bank for tier {_tier!r} has fewer than 100 "
+            f"entries (truths={len(TRUTHS[_tier])}, dares={len(DARES[_tier])})"
+        )
+
 FORFEIT_PUNISHMENTS = [
     "🐔 **Certified Chicken:** Give a 30-second concession speech explaining why the prompt defeated you. Make it sound like a defeated champion.",
     "🐔 **Certified Chicken:** Accept the title 'Mayor of Almost Doing It' and give a 20-second campaign speech defending your new office.",
@@ -260,20 +284,6 @@ FORFEIT_PUNISHMENTS = [
     "🐔 **Certified Chicken:** Explain the prompt's difficulty like a game reviewer, including a score out of ten and a patch suggestion.",
     "🐔 **Certified Chicken:** Improvise a 30-second villain origin story explaining how this prompt broke you.",
     "🐔 **Certified Chicken:** Give a formal resignation speech from the game, with one real reason and one ridiculous reason.",
-    "🐔 **Certified Chicken:** Defend your forfeit in a 45-second courtroom statement. The challenger gets one rebuttal.",
-    "🐔 **Certified Chicken:** Announce a comeback plan with three specific promises for the next round."
-]
-
-
-FORFEIT_PUNISHMENTS = [
-    "🐔 **Certified Chicken:** Give a 30-second concession speech explaining why the prompt defeated you. Make it sound like a defeated champion.",
-    "🐔 **Certified Chicken:** Accept the title 'Mayor of Almost Doing It' and give a 20-second campaign speech defending your new office.",
-    "🐔 **Certified Chicken:** Deliver a mock press conference: two questions from the challenger, answered as dramatically as possible.",
-    "🐔 **Certified Chicken:** Write a four-line eulogy for your courage, then read it with absolute sincerity.",
-    "🐔 **Certified Chicken:** Give the challenger 500 imaginary Aura points and explain why they clearly outclassed you.",
-    "🐔 **Certified Chicken:** Explain the prompt's difficulty like a game reviewer, including a score out of ten and a patch suggestion.",
-    "🐔 **Certified Chicken:** Improvise a 30-second villain origin story explaining how this prompt broke you.",
-    "🐔 **Certified Chicken:** Give a formal resignation speech from the game, with one real reason and one completely ridiculous reason.",
     "🐔 **Certified Chicken:** Defend your forfeit in a 45-second courtroom statement. The challenger gets one rebuttal.",
     "🐔 **Certified Chicken:** Announce a comeback plan with three specific promises for the next round."
 ]
@@ -300,6 +310,9 @@ class TODView(NexoraView):
         self.is_completed = False
         self.is_forfeit = False
         self.reroll_count = 0
+        # Avoid repeating a prompt in this game session until that tier/type pool
+        # has been exhausted.
+        self.used_prompts: set[tuple[str, str]] = set()
 
         if initial_prompt_type in ("Truth", "Dare"):
             self._show_prompt(initial_prompt_type)
@@ -341,11 +354,16 @@ class TODView(NexoraView):
 
     def _show_prompt(self, p_type: str, prompt: Optional[str] = None):
         self.prompt_type = p_type
-        if prompt:
+        pool = TRUTHS[self.rating] if p_type == "Truth" else DARES[self.rating]
+        if prompt is not None:
             self.current_prompt = prompt
         else:
-            pool = TRUTHS[self.rating] if p_type == "Truth" else DARES[self.rating]
-            self.current_prompt = random.choice(pool)
+            unused = [item for item in pool if (p_type, item) not in self.used_prompts]
+            if not unused:
+                # Only recycle after every prompt in this rating/type has appeared.
+                unused = list(pool)
+            self.current_prompt = random.choice(unused)
+        self.used_prompts.add((p_type, self.current_prompt))
 
         self.clear_container()
         emoji = "💬" if p_type == "Truth" else "⚡"
@@ -468,10 +486,7 @@ class TODView(NexoraView):
             return await interaction.response.send_message("⚠️ You have used all available rerolls for this prompt!", ephemeral=True)
 
         self.reroll_count += 1
-        pool = TRUTHS[self.rating] if self.prompt_type == "Truth" else DARES[self.rating]
-        filtered = [p for p in pool if p != self.current_prompt]
-        new_prompt = random.choice(filtered or pool)
-        self._show_prompt(self.prompt_type, prompt=new_prompt)
+        self._show_prompt(self.prompt_type or "Truth")
         await interaction.response.edit_message(view=self)
 
     async def _on_done(self, interaction: discord.Interaction):
