@@ -761,28 +761,47 @@ class Premium(commands.Cog):
 
     async def get_server_doc(self, guild_id: int) -> dict:
         gid = int(guild_id)
+        local_doc = self._get_local_server_doc(gid)
+
         if self.col_server is not None:
             try:
                 doc = await self.col_server.find_one({"_id": gid})
                 if not doc:
                     doc = await self.col_server.find_one({"_id": str(gid)})
                 if doc:
-                    # Some premium feature writes historically created partial
-                    # Mongo documents without a tier. Merge the saved entitlement
-                    # back in instead of accidentally downgrading that server to Free.
-                    if not doc.get("tier"):
-                        local_doc = self._get_local_server_doc(gid)
-                        if local_doc.get("tier"):
+                    # Feature setup may have created a partial DB record, and older
+                    # grants may exist only in the local subscription file. Preserve
+                    # the newest entitlement while keeping Mongo's feature settings.
+                    if local_doc.get("tier"):
+                        local_times = [
+                            _parse_dt(local_doc.get(key))
+                            for key in ("purchased_at", "revoked_at", "updated_at", "activated_at")
+                        ]
+                        db_times = [
+                            _parse_dt(doc.get(key))
+                            for key in ("purchased_at", "revoked_at", "updated_at", "activated_at")
+                        ]
+                        local_times = [value for value in local_times if value is not None]
+                        db_times = [value for value in db_times if value is not None]
+                        local_updated = max(local_times) if local_times else None
+                        db_updated = max(db_times) if db_times else None
+                        local_is_newer = local_updated is not None and (
+                            db_updated is None or local_updated > db_updated
+                        )
+
+                        if not doc.get("tier") or local_is_newer:
                             merged = {**local_doc, **doc}
-                            merged["tier"] = local_doc["tier"]
-                            merged["expires_at"] = local_doc.get("expires_at")
-                            merged.setdefault("purchased_by", local_doc.get("purchased_by"))
-                            merged.setdefault("purchased_at", local_doc.get("purchased_at"))
+                            for key in (
+                                "tier", "expires_at", "purchased_by", "purchased_at",
+                                "payment_method", "notes", "revoked_at", "updated_at",
+                            ):
+                                if key in local_doc:
+                                    merged[key] = local_doc[key]
                             return merged
                     return doc
             except Exception as exc:
                 logger.warning("Premium lookup failed; trying local JSON fallback: %s", exc)
-        return self._get_local_server_doc(gid)
+        return local_doc
 
     async def get_user_doc(self, user_id: int) -> dict:
         if self.col_user is None:
@@ -1323,6 +1342,79 @@ class Premium(commands.Cog):
             self.bot.premium_guild_ids.discard(gid)
             self.bot.premium_guild_tiers.pop(gid, None)
         await ctx.send(f"Set server premium for {gid} to {tier} ({'Permanent' if days == -1 or tier == 'GRANDFATHERED' else f'{days} days'}).")
+
+    @app_commands.command(name="premium_grant", description="Grant Server Premium to a Discord server (bot owner only)")
+    @app_commands.describe(
+        guild_id="Numeric Discord server ID",
+        tier="Premium tier to grant",
+        days="Duration in days; use -1 for permanent",
+    )
+    @app_commands.choices(tier=[
+        app_commands.Choice(name="Basic", value="BASIC"),
+        app_commands.Choice(name="Pro", value="PRO"),
+        app_commands.Choice(name="Enterprise", value="ENTERPRISE"),
+        app_commands.Choice(name="Custom", value="CUSTOM"),
+        app_commands.Choice(name="Grandfathered (Lifetime)", value="GRANDFATHERED"),
+    ])
+    @app_commands.checks.is_owner()
+    async def premium_grant_slash(
+        self,
+        interaction: discord.Interaction,
+        guild_id: str,
+        tier: str = "PRO",
+        days: int = 30,
+    ):
+        try:
+            gid = int(guild_id.strip())
+        except (ValueError, AttributeError):
+            return await interaction.response.send_message("Guild ID must be a numeric Discord server ID.", ephemeral=True)
+
+        tier = str(tier or "PRO").strip().upper()
+        if tier not in SERVER_TIERS or tier == "FREE":
+            return await interaction.response.send_message("Choose Basic, Pro, Enterprise, Custom, or Grandfathered.", ephemeral=True)
+        if days != -1 and days < 1:
+            return await interaction.response.send_message("Duration must be at least 1 day, or -1 for permanent.", ephemeral=True)
+
+        expires = None if days == -1 or tier == "GRANDFATHERED" else utcnow() + timedelta(days=days)
+        metadata = {
+            "purchased_by": interaction.user.id,
+            "purchased_at": utcnow().isoformat(),
+            "payment_method": "Manual",
+            "notes": f"Set by {interaction.user}",
+        }
+
+        if self.col_server is not None:
+            try:
+                await self.col_server.update_one(
+                    {"_id": gid},
+                    {"$set": {**metadata, "tier": tier, "expires_at": expires}},
+                    upsert=True,
+                )
+            except Exception as exc:
+                logger.error("Slash premium grant failed in MongoDB: %s", exc)
+                return await interaction.response.send_message(
+                    "MongoDB could not save the premium grant. No grant was reported as successful.",
+                    ephemeral=True,
+                )
+
+        try:
+            self._save_local_server_subscription(gid, tier, expires, **metadata)
+        except Exception as exc:
+            if self.col_server is None:
+                logger.error("Could not save slash premium grant locally: %s", exc)
+                return await interaction.response.send_message("Could not save premium to local storage.", ephemeral=True)
+            logger.warning("Could not mirror slash premium grant locally: %s", exc)
+
+        self.bot.premium_guild_ids.add(gid)
+        self.bot.premium_guild_tiers[gid] = tier
+        duration = "Permanent" if days == -1 or tier == "GRANDFATHERED" else f"{days} days"
+        warning = ""
+        if self.col_server is None:
+            warning = "\n\nWarning: MongoDB is not connected. The entitlement is saved locally, but database-backed perks such as vanity roles, booster roles, and auto-responder settings need MongoDB to be available."
+        await interaction.response.send_message(
+            f"Granted {tier} Server Premium to guild {gid} for {duration}.{warning}",
+            ephemeral=True,
+        )
 
     @commands.command(name="set_user_vip")
     @commands.is_owner()
