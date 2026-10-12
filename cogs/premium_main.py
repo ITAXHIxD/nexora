@@ -30,6 +30,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from utils.premium_storage import load_premium_data, save_premium_data
+
 from utils.ui import (
     BRAND_COLOR,
     PREMIUM_COLOR,
@@ -673,8 +675,12 @@ class Premium(commands.Cog):
         if not self.vanity_scan_task.is_running():
             self.vanity_scan_task.start()
 
-        # Patch bot helpers
+        # Patch shared helpers used by premium-gated features.
         cog = self
+
+        def _get_tier_config(tier: str) -> dict:
+            key = str(tier or "FREE").strip().upper()
+            return SERVER_TIERS.get(key, SERVER_TIERS["FREE"])
 
         async def _is_premium_guild(guild_id: int) -> bool:
             return await cog.is_premium_guild(guild_id)
@@ -693,6 +699,7 @@ class Premium(commands.Cog):
 
         self.bot.is_premium_guild     = _is_premium_guild
         self.bot.get_premium_tier     = _get_premium_tier
+        self.bot.get_tier_config      = _get_tier_config
         self.bot.is_premium_user      = _is_premium_user
         self.bot.get_user_vip_tier    = _get_user_vip_tier
         self.bot.get_user_custom_color = _get_user_custom_color
@@ -715,11 +722,53 @@ class Premium(commands.Cog):
 
     # ── Database Lookups ──────────────────────────────────────────────────────
 
-    async def get_server_doc(self, guild_id: int) -> dict:
-        if self.col_server is None:
+    def _get_local_server_doc(self, guild_id: int) -> dict:
+        """Read a server subscription and vanity settings from the local fallback."""
+        data = load_premium_data()
+        subscriptions = data.get("subscriptions", {})
+        subscription = subscriptions.get(str(guild_id), {}) if isinstance(subscriptions, dict) else {}
+        if not isinstance(subscription, dict) or not subscription:
             return {}
-        doc = await self.col_server.find_one({"_id": guild_id})
-        return doc or {}
+
+        doc = dict(subscription)
+        doc["_id"] = int(guild_id)
+        vanity = data.get("vanity", {})
+        if isinstance(vanity, dict):
+            roles_map = vanity.get("roles", {})
+            settings_map = vanity.get("settings", {})
+            if isinstance(roles_map, dict):
+                doc.setdefault("vanity_roles", roles_map.get(str(guild_id), {}))
+            if isinstance(settings_map, dict):
+                doc.setdefault("vanity_settings", settings_map.get(str(guild_id), {}))
+        return doc
+
+    def _save_local_server_subscription(self, guild_id: int, tier: str, expires_at, **metadata) -> None:
+        data = load_premium_data()
+        subscriptions = data.setdefault("subscriptions", {})
+        key = str(guild_id)
+        current = subscriptions.get(key)
+        if not isinstance(current, dict):
+            current = {}
+        current.update({
+            "tier": str(tier).upper(),
+            "expires_at": expires_at.isoformat() if isinstance(expires_at, datetime) else expires_at,
+            **metadata,
+        })
+        subscriptions[key] = current
+        save_premium_data(data)
+
+    async def get_server_doc(self, guild_id: int) -> dict:
+        gid = int(guild_id)
+        if self.col_server is not None:
+            try:
+                doc = await self.col_server.find_one({"_id": gid})
+                if not doc:
+                    doc = await self.col_server.find_one({"_id": str(gid)})
+                if doc:
+                    return doc
+            except Exception as exc:
+                logger.warning("Premium lookup failed; trying local JSON fallback: %s", exc)
+        return self._get_local_server_doc(gid)
 
     async def get_user_doc(self, user_id: int) -> dict:
         if self.col_user is None:
@@ -728,38 +777,44 @@ class Premium(commands.Cog):
         return doc or {}
 
     async def is_premium_guild(self, guild_id: int) -> bool:
-        doc = await self.get_server_doc(guild_id)
-        if not doc:
-            self.bot.premium_guild_ids.discard(guild_id)
-            self.bot.premium_guild_tiers.pop(guild_id, None)
-            return False
-        tier = doc.get("tier", "FREE").upper()
+        gid = int(guild_id)
+        doc = await self.get_server_doc(gid)
+        tier = str(doc.get("tier", "FREE") or "FREE").upper() if doc else "FREE"
+
         if tier == "GRANDFATHERED":
-            self.bot.premium_guild_ids.add(guild_id)
-            self.bot.premium_guild_tiers[guild_id] = "GRANDFATHERED"
+            self.bot.premium_guild_ids.add(gid)
+            self.bot.premium_guild_tiers[gid] = tier
             return True
-        if tier not in PAID_SERVER_TIERS:
-            self.bot.premium_guild_ids.discard(guild_id)
-            self.bot.premium_guild_tiers.pop(guild_id, None)
-            return False
-        active = not _is_expired(doc)
+
+        active = bool(doc) and tier in PAID_SERVER_TIERS and not _is_expired(doc)
         if active:
-            self.bot.premium_guild_ids.add(guild_id)
-            self.bot.premium_guild_tiers[guild_id] = tier
+            self.bot.premium_guild_ids.add(gid)
+            self.bot.premium_guild_tiers[gid] = tier
         else:
-            self.bot.premium_guild_ids.discard(guild_id)
-            self.bot.premium_guild_tiers.pop(guild_id, None)
+            self.bot.premium_guild_ids.discard(gid)
+            self.bot.premium_guild_tiers.pop(gid, None)
         return active
 
     async def get_premium_tier(self, guild_id: int) -> str:
-        doc = await self.get_server_doc(guild_id)
+        gid = int(guild_id)
+        doc = await self.get_server_doc(gid)
         if not doc:
+            self.bot.premium_guild_ids.discard(gid)
+            self.bot.premium_guild_tiers.pop(gid, None)
             return "FREE"
-        tier = doc.get("tier", "FREE").upper()
+
+        tier = str(doc.get("tier", "FREE") or "FREE").upper()
         if tier == "GRANDFATHERED":
-            return "GRANDFATHERED"
-        if _is_expired(doc):
+            self.bot.premium_guild_ids.add(gid)
+            self.bot.premium_guild_tiers[gid] = tier
+            return tier
+        if tier not in PAID_SERVER_TIERS or _is_expired(doc):
+            self.bot.premium_guild_ids.discard(gid)
+            self.bot.premium_guild_tiers.pop(gid, None)
             return "FREE"
+
+        self.bot.premium_guild_ids.add(gid)
+        self.bot.premium_guild_tiers[gid] = tier
         return tier
 
     async def is_premium_user(self, user_id: int) -> bool:
@@ -1150,29 +1205,57 @@ class Premium(commands.Cog):
     @commands.is_owner()
     async def set_premium(self, ctx: commands.Context, guild_id: Optional[str] = None, tier: str = "PRO", days: int = 30):
         """[Owner] Grant or update server premium subscription."""
-        if self.col_server is None:
-            return await ctx.send("❌ MongoDB not connected.")
-        gid = int(guild_id) if guild_id else ctx.guild.id
-        tier = tier.upper()
+        if guild_id:
+            try:
+                gid = int(guild_id)
+            except ValueError:
+                return await ctx.send("Guild ID must be a numeric Discord server ID.")
+        elif ctx.guild:
+            gid = ctx.guild.id
+        else:
+            return await ctx.send("Provide a guild ID when running this command in DMs.")
+
+        tier = str(tier or "PRO").strip().upper()
         if tier not in SERVER_TIERS:
-            return await ctx.send(f"❌ Unknown tier. Valid: `{' | '.join(SERVER_TIERS)}`")
+            return await ctx.send(f"Unknown tier. Valid: {' | '.join(SERVER_TIERS)}")
+        if days != -1 and days < 1:
+            return await ctx.send("Duration must be at least 1 day, or -1 for permanent.")
 
         expires = None if days == -1 else utcnow() + timedelta(days=days)
-        await self.col_server.update_one(
-            {"_id": gid},
-            {"$set": {
-                "tier":           tier,
-                "expires_at":     expires,
-                "purchased_by":   ctx.author.id,
-                "purchased_at":   utcnow(),
-                "payment_method": "Manual",
-                "notes":          f"Set by {ctx.author}",
-            }},
-            upsert=True,
-        )
-        self.bot.premium_guild_ids.add(gid)
-        self.bot.premium_guild_tiers[gid] = tier
-        await ctx.send(f"✅ Set server premium for `{gid}` to **{tier}** ({'Permanent' if days == -1 else f'{days}d'}).")
+        metadata = {
+            "purchased_by": ctx.author.id,
+            "purchased_at": utcnow().isoformat(),
+            "payment_method": "Manual",
+            "notes": f"Set by {ctx.author}",
+        }
+
+        if self.col_server is not None:
+            try:
+                await self.col_server.update_one(
+                    {"_id": gid},
+                    {"$set": {**metadata, "tier": tier, "expires_at": expires}},
+                    upsert=True,
+                )
+            except Exception as exc:
+                logger.warning("Premium grant failed in MongoDB; keeping a local fallback: %s", exc)
+
+        try:
+            # Mirror entitlement state locally so premium gates remain reliable during outages.
+            self._save_local_server_subscription(gid, tier, expires, **metadata)
+        except Exception as exc:
+            if self.col_server is None:
+                logger.error("Could not save premium grant locally: %s", exc)
+                return await ctx.send("Could not save premium to the local fallback.")
+            logger.warning("Could not mirror premium grant into local JSON: %s", exc)
+
+        active = tier in PAID_SERVER_TIERS and (tier == "GRANDFATHERED" or not _is_expired({"expires_at": expires}))
+        if active:
+            self.bot.premium_guild_ids.add(gid)
+            self.bot.premium_guild_tiers[gid] = tier
+        else:
+            self.bot.premium_guild_ids.discard(gid)
+            self.bot.premium_guild_tiers.pop(gid, None)
+        await ctx.send(f"Set server premium for {gid} to {tier} ({'Permanent' if days == -1 else f'{days} days'}).")
 
     @commands.command(name="set_user_vip")
     @commands.is_owner()
@@ -1203,11 +1286,39 @@ class Premium(commands.Cog):
     @commands.is_owner()
     async def revoke_premium(self, ctx: commands.Context, guild_id: Optional[str] = None):
         """[Owner] Revoke server premium."""
-        gid = int(guild_id) if guild_id else ctx.guild.id
-        await self.col_server.update_one({"_id": gid}, {"$set": {"tier": "FREE", "expires_at": utcnow()}}, upsert=True)
+        if guild_id:
+            try:
+                gid = int(guild_id)
+            except ValueError:
+                return await ctx.send("Guild ID must be a numeric Discord server ID.")
+        elif ctx.guild:
+            gid = ctx.guild.id
+        else:
+            return await ctx.send("Provide a guild ID when running this command in DMs.")
+
+        now = utcnow()
+        if self.col_server is not None:
+            try:
+                await self.col_server.update_one(
+                    {"_id": gid},
+                    {"$set": {"tier": "FREE", "expires_at": now}},
+                    upsert=True,
+                )
+            except Exception as exc:
+                logger.error("Could not revoke premium in MongoDB: %s", exc)
+                return await ctx.send("Database could not save the revocation; the grant remains unchanged.")
+
+        try:
+            self._save_local_server_subscription(gid, "FREE", now, revoked_at=now.isoformat())
+        except Exception as exc:
+            if self.col_server is None:
+                logger.error("Could not revoke premium in local storage: %s", exc)
+                return await ctx.send("Could not save the revocation.")
+            logger.warning("Could not mirror premium revocation into local JSON: %s", exc)
+
         self.bot.premium_guild_ids.discard(gid)
         self.bot.premium_guild_tiers.pop(gid, None)
-        await ctx.send(f"✅ Revoked server premium from `{gid}`.")
+        await ctx.send(f"Revoked server premium from {gid}.")
 
     @commands.command(name="revoke_user_vip")
     @commands.is_owner()
