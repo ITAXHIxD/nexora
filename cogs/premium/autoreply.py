@@ -25,6 +25,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict
+from types import SimpleNamespace
 
 import discord
 from discord import app_commands
@@ -149,12 +150,15 @@ class AutoResponder(commands.Cog):
                     return
             except Exception as exc:
                 logger.debug("Auto-responder hit counter update failed: %s", exc)
-        replies = self._get_local_replies(guild_id)
-        for item in replies:
-            if item.get("id") == reply_id:
-                item["hits"] = int(item.get("hits", 0)) + 1
-                break
-        self._save_local_replies(guild_id, replies)
+        try:
+            replies = self._get_local_replies(guild_id)
+            for item in replies:
+                if item.get("id") == reply_id:
+                    item["hits"] = int(item.get("hits", 0)) + 1
+                    break
+            self._save_local_replies(guild_id, replies)
+        except Exception as exc:
+            logger.debug("Auto-responder local hit counter update failed: %s", exc)
 
     def _format_reply(self, template: str, message: discord.Message) -> str:
         guild = message.guild
@@ -288,7 +292,7 @@ class AutoResponder(commands.Cog):
     @commands.guild_only()
     @app_commands.describe(
         trigger="The word or phrase that triggers the bot response",
-        reply="The message the bot will send (supports {user}, {server}, {channel}, {members})",
+        reply="The response text (supports user, server, channel, IDs, member count, and relative time variables)",
         match_mode="Match type (contains, exact, startswith)",
     )
     @app_commands.choices(match_mode=[
@@ -383,7 +387,13 @@ class AutoResponder(commands.Cog):
         if not matched:
             return await ctx.send(f"❌ Trigger `{clean_trigger}` not found.", ephemeral=True)
 
-        formatted = self._format_reply(matched["reply"], ctx.message)
+        preview_message = SimpleNamespace(
+            author=ctx.author,
+            guild=ctx.guild,
+            channel=ctx.channel,
+            created_at=getattr(ctx.message, "created_at", datetime.now(timezone.utc)),
+        )
+        formatted = self._format_reply(matched["reply"], preview_message)
         embed = discord.Embed(
             title=f"🧪 Auto-Reply Preview: `{clean_trigger}`",
             description=formatted,
