@@ -268,6 +268,20 @@ EXTENSIONS = [
 ]
 
 
+def _safe_dt(val) -> datetime | None:
+    if val is None or val == "null":
+        return None
+    if isinstance(val, datetime):
+        return val if val.tzinfo is not None else val.replace(tzinfo=timezone.utc)
+    if isinstance(val, str):
+        try:
+            dt = datetime.fromisoformat(val)
+            return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
+
+
 class CharacterBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.all()
@@ -290,6 +304,9 @@ class CharacterBot(commands.Bot):
         self.db_manager = DatabaseManager(DATABASE_ENABLED)
         self.premium_guild_ids = set()
         self.premium_guild_tiers = {}
+        self.premium_user_ids = set()
+        self.premium_user_tiers = {}
+        self.premium_user_colors = {}
         self.session: aiohttp.ClientSession | None = None
         self.log_channel: discord.TextChannel | None = None
         self.loaded_extensions: set[str] = set()
@@ -450,11 +467,49 @@ class CharacterBot(commands.Bot):
 
     def load_premium_guilds(self):
         self.premium_guild_ids = set()
-        logger.debug("Loaded premium guilds")
+        self.premium_guild_tiers = {}
+        self.premium_user_ids = set()
+        self.premium_user_tiers = {}
+        self.premium_user_colors = {}
+        try:
+            premium_data = load_premium_data()
+            for gid_str, sub in premium_data.get("subscriptions", {}).items():
+                if isinstance(sub, dict) and sub.get("tier", "FREE").upper() != "FREE":
+                    exp = _safe_dt(sub.get("expires_at"))
+                    if exp and datetime.now(timezone.utc) > exp:
+                        continue
+                    gid = int(gid_str) if str(gid_str).isdigit() else gid_str
+                    self.premium_guild_ids.add(gid)
+                    self.premium_guild_tiers[gid] = sub.get("tier", "FREE").upper()
+
+            for uid_str, usub in premium_data.get("user_subscriptions", {}).items():
+                if isinstance(usub, dict) and usub.get("tier", "FREE").upper() != "FREE":
+                    exp = _safe_dt(usub.get("expires_at"))
+                    if exp and datetime.now(timezone.utc) > exp:
+                        continue
+                    uid = int(uid_str) if str(uid_str).isdigit() else uid_str
+                    self.premium_user_ids.add(uid)
+                    self.premium_user_tiers[uid] = usub.get("tier", "FREE").upper()
+                    if usub.get("custom_color"):
+                        self.premium_user_colors[uid] = usub["custom_color"]
+            logger.debug(
+                "Loaded %d premium guilds and %d VIP users from local storage",
+                len(self.premium_guild_ids), len(self.premium_user_ids),
+            )
+        except Exception as e:
+            logger.error("Error reading premium storage: %s", e)
 
     def load_premium_tiers(self):
-        self.premium_guild_tiers = {}
-        logger.debug("Loaded premium tiers")
+        pass
+
+    def get_tier_config(self, tier: str) -> dict:
+        t = str(tier or "FREE").strip().upper()
+        try:
+            with open("config/premium_config.json", "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                return cfg.get("premium_tiers", {}).get(t, {})
+        except Exception:
+            return {"features": {}, "limits": {}}
 
     def is_premium_guild(self, guild_id: int) -> bool:
         gid = int(guild_id)
@@ -465,18 +520,46 @@ class CharacterBot(commands.Bot):
             premium_data = load_premium_data()
             subscription = premium_data.get("subscriptions", {}).get(guild_str)
             if subscription:
-                expires_at = subscription.get("expires_at")
-                if expires_at and expires_at != "null":
-                    try:
-                        if datetime.now(timezone.utc) > datetime.fromisoformat(expires_at):
-                            return False
-                    except ValueError:
-                        pass
+                exp = _safe_dt(subscription.get("expires_at"))
+                if exp and datetime.now(timezone.utc) > exp:
+                    return False
                 return subscription.get("tier", "FREE").lower() != "free"
         except Exception as e:
             logger.error("Error reading premium runtime data: %s", e)
 
         return self.premium_guild_tiers.get(gid, "free").lower() != "free" or self.premium_guild_tiers.get(guild_str, "free").lower() != "free"
+
+    def get_premium_tier(self, guild_id: int) -> str:
+        gid = int(guild_id)
+        if not self.is_premium_guild(gid):
+            return "FREE"
+        return self.premium_guild_tiers.get(gid) or self.premium_guild_tiers.get(str(gid), "FREE")
+
+    def is_premium_user(self, user_id: int) -> bool:
+        uid = int(user_id)
+        if uid in self.premium_user_ids or str(uid) in self.premium_user_ids:
+            return True
+        user_str = str(user_id)
+        try:
+            premium_data = load_premium_data()
+            sub = premium_data.get("user_subscriptions", {}).get(user_str)
+            if sub:
+                exp = _safe_dt(sub.get("expires_at"))
+                if exp and datetime.now(timezone.utc) > exp:
+                    return False
+                return sub.get("tier", "FREE").lower() != "free"
+        except Exception as e:
+            logger.error("Error reading user VIP runtime data: %s", e)
+        return self.premium_user_tiers.get(uid, "free").lower() != "free"
+
+    def get_user_vip_tier(self, user_id: int) -> str:
+        uid = int(user_id)
+        if not self.is_premium_user(uid):
+            return "FREE"
+        return self.premium_user_tiers.get(uid) or self.premium_user_tiers.get(str(uid), "FREE")
+
+    def get_user_custom_color(self, user_id: int) -> int | None:
+        return self.premium_user_colors.get(int(user_id))
 
     # ── Support & System Logging ───────────────────────────────────────────────
 

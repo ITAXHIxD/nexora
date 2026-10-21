@@ -22,6 +22,7 @@ UNSAFE_WEBHOOK_KEYS = {
 def default_premium_data() -> dict[str, Any]:
     return {
         "subscriptions": {},
+        "user_subscriptions": {},
         "vanity": {
             "roles": {},
             "settings": {},
@@ -56,6 +57,11 @@ def sanitize_premium_data(data: Any) -> tuple[dict[str, Any], bool]:
     subscriptions = sanitized.get("subscriptions")
     if not isinstance(subscriptions, dict):
         sanitized["subscriptions"] = {}
+        changed = True
+
+    user_subscriptions = sanitized.get("user_subscriptions")
+    if not isinstance(user_subscriptions, dict):
+        sanitized["user_subscriptions"] = {}
         changed = True
 
     vanity = sanitized.get("vanity")

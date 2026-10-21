@@ -31,10 +31,16 @@ class UserInfoView(NexoraView):
         self,
         target: Union[discord.Member, discord.User],
         requester: discord.abc.User,
+        bot: Optional[commands.Bot] = None,
         timeout: float = 180,
     ):
+        self.bot = bot
         color = BRAND_COLOR
-        if isinstance(target, discord.Member) and target.color and target.color.value:
+        if bot and hasattr(bot, "get_user_custom_color"):
+            custom_c = bot.get_user_custom_color(target.id)
+            if custom_c:
+                color = custom_c
+        if color == BRAND_COLOR and isinstance(target, discord.Member) and target.color and target.color.value:
             color = target.color.value
         super().__init__(user_id=requester.id, color=color, timeout=timeout)
         self.target = target
@@ -54,6 +60,25 @@ class UserInfoView(NexoraView):
             badges.append("🛡️ **Admin**")
         if is_member and getattr(u, "premium_since", None):
             badges.append("💎 **Booster**")
+
+        # VIP Badge Check
+        if self.bot:
+            vip_checker = getattr(self.bot, "is_premium_user", None)
+            is_vip = False
+            if callable(vip_checker):
+                res = vip_checker(u.id)
+                is_vip = bool(res)
+            elif u.id in getattr(self.bot, "premium_user_ids", set()):
+                is_vip = True
+
+            if is_vip:
+                badge_getter = getattr(self.bot, "get_user_vip_badge", None)
+                b_info = badge_getter(u.id) if callable(badge_getter) else None
+                if b_info:
+                    badges.append(f"{b_info['emoji']} **{b_info['label']}**")
+                else:
+                    badges.append("👑 **Nexora VIP**")
+
         if u.bot:
             badges.append("🤖 **Bot**")
         
@@ -171,7 +196,7 @@ class UserInfo(commands.Cog):
         if not isinstance(target, discord.Member) and ctx.guild:
             target = ctx.guild.get_member(target.id) or target
 
-        view = UserInfoView(target, ctx.author)
+        view = UserInfoView(target, ctx.author, bot=ctx.bot)
         await send_view(ctx, view)
 
 

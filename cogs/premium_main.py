@@ -650,6 +650,28 @@ class Premium(commands.Cog):
         self.col_user = None
 
     async def cog_load(self):
+        # 1. First populate in-memory state from local storage fallback
+        try:
+            local_data = load_premium_data()
+            for gid_str, sub in local_data.get("subscriptions", {}).items():
+                if isinstance(sub, dict) and sub.get("tier", "FREE").upper() in PAID_SERVER_TIERS:
+                    if not _is_expired(sub):
+                        gid = int(gid_str) if str(gid_str).isdigit() else gid_str
+                        self.bot.premium_guild_ids.add(gid)
+                        self.bot.premium_guild_tiers[gid] = sub.get("tier", "FREE").upper()
+
+            for uid_str, usub in local_data.get("user_subscriptions", {}).items():
+                if isinstance(usub, dict) and usub.get("tier", "FREE").upper() in PAID_USER_TIERS:
+                    if not _is_expired(usub):
+                        uid = int(uid_str) if str(uid_str).isdigit() else uid_str
+                        self.bot.premium_user_ids.add(uid)
+                        self.bot.premium_user_tiers[uid] = usub.get("tier", "FREE").upper()
+                        if usub.get("custom_color"):
+                            self.bot.premium_user_colors[uid] = usub["custom_color"]
+        except Exception as exc:
+            logger.warning("Local premium pre-cache warning: %s", exc)
+
+        # 2. Reconcile with MongoDB if available
         db = getattr(self.bot, "mongo_db", None)
         if db is not None:
             self.col_server = db["premium"]
@@ -658,7 +680,7 @@ class Premium(commands.Cog):
 
             await self._scrub_unsafe_webhook_fields()
 
-            # Cache server premium
+            # Cache server premium from Mongo
             try:
                 async for doc in self.col_server.find({"tier": {"$in": list(PAID_SERVER_TIERS)}}):
                     if not _is_expired(doc):
@@ -667,10 +689,7 @@ class Premium(commands.Cog):
             except Exception as e:
                 logger.warning("Premium server cache warning: %s", e)
 
-            # Cache user VIP
-            self.bot.premium_user_ids = set()
-            self.bot.premium_user_tiers = {}
-            self.bot.premium_user_colors = {}
+            # Cache user VIP from Mongo
             try:
                 async for doc in self.col_user.find({"tier": {"$in": list(PAID_USER_TIERS)}}):
                     if not _is_expired(doc):
@@ -682,7 +701,7 @@ class Premium(commands.Cog):
             except Exception as e:
                 logger.warning("Premium user cache warning: %s", e)
         else:
-            logger.warning("Premium: mongo_db unavailable")
+            logger.warning("Premium: mongo_db unavailable, operating with local fallback storage")
 
         if not self.vanity_scan_task.is_running():
             self.vanity_scan_task.start()
@@ -709,12 +728,22 @@ class Premium(commands.Cog):
         def _get_user_custom_color(user_id: int) -> Optional[int]:
             return getattr(cog.bot, "premium_user_colors", {}).get(user_id)
 
-        self.bot.is_premium_guild     = _is_premium_guild
-        self.bot.get_premium_tier     = _get_premium_tier
-        self.bot.get_tier_config      = _get_tier_config
-        self.bot.is_premium_user      = _is_premium_user
-        self.bot.get_user_vip_tier    = _get_user_vip_tier
+        def _get_user_vip_badge(user_id: int) -> Optional[dict]:
+            from cogs.premium.user_vip import VIP_BADGES
+            uid = int(user_id)
+            if not (uid in cog.bot.premium_user_ids or str(uid) in cog.bot.premium_user_ids):
+                return None
+            udoc = cog._get_local_user_doc(uid)
+            b_key = udoc.get("badge", "crown")
+            return VIP_BADGES.get(b_key, VIP_BADGES["crown"])
+
+        self.bot.is_premium_guild      = _is_premium_guild
+        self.bot.get_premium_tier      = _get_premium_tier
+        self.bot.get_tier_config       = _get_tier_config
+        self.bot.is_premium_user       = _is_premium_user
+        self.bot.get_user_vip_tier     = _get_user_vip_tier
         self.bot.get_user_custom_color = _get_user_custom_color
+        self.bot.get_user_vip_badge    = _get_user_vip_badge
 
     def cog_unload(self):
         if self.vanity_scan_task.is_running():
@@ -813,11 +842,69 @@ class Premium(commands.Cog):
                 logger.warning("Premium lookup failed; trying local JSON fallback: %s", exc)
         return local_doc
 
-    async def get_user_doc(self, user_id: int) -> dict:
-        if self.col_user is None:
+    def _get_local_user_doc(self, user_id: int) -> dict:
+        data = load_premium_data()
+        user_subs = data.get("user_subscriptions", {})
+        sub = user_subs.get(str(user_id), {}) if isinstance(user_subs, dict) else {}
+        if not isinstance(sub, dict) or not sub:
             return {}
-        doc = await self.col_user.find_one({"_id": user_id})
-        return doc or {}
+        doc = dict(sub)
+        doc["_id"] = int(user_id)
+        return doc
+
+    def _save_local_user_subscription(self, user_id: int, tier: str, expires_at, **metadata) -> None:
+        data = load_premium_data()
+        user_subs = data.setdefault("user_subscriptions", {})
+        key = str(user_id)
+        current = user_subs.get(key, {})
+        if not isinstance(current, dict):
+            current = {}
+        current.update({
+            "tier": str(tier).upper(),
+            "expires_at": expires_at.isoformat() if isinstance(expires_at, datetime) else expires_at,
+            **metadata,
+        })
+        user_subs[key] = current
+        save_premium_data(data)
+
+    async def get_user_doc(self, user_id: int) -> dict:
+        uid = int(user_id)
+        local_doc = self._get_local_user_doc(uid)
+        if self.col_user is not None:
+            try:
+                doc = await self.col_user.find_one({"_id": uid})
+                if not doc:
+                    doc = await self.col_user.find_one({"_id": str(uid)})
+                if doc:
+                    if local_doc.get("tier"):
+                        local_times = [
+                            _parse_dt(local_doc.get(key))
+                            for key in ("purchased_at", "revoked_at", "updated_at", "activated_at")
+                        ]
+                        db_times = [
+                            _parse_dt(doc.get(key))
+                            for key in ("purchased_at", "revoked_at", "updated_at", "activated_at")
+                        ]
+                        local_times = [v for v in local_times if v is not None]
+                        db_times = [v for v in db_times if v is not None]
+                        local_updated = max(local_times) if local_times else None
+                        db_updated = max(db_times) if db_times else None
+                        local_is_newer = local_updated is not None and (
+                            db_updated is None or local_updated > db_updated
+                        )
+                        if not doc.get("tier") or local_is_newer:
+                            merged = {**local_doc, **doc}
+                            for k in (
+                                "tier", "expires_at", "activated_at", "server_passes",
+                                "revoked_at", "custom_color", "badge", "purchased_at",
+                            ):
+                                if k in local_doc:
+                                    merged[k] = local_doc[k]
+                            return merged
+                    return doc
+            except Exception as exc:
+                logger.warning("User VIP Mongo lookup failed, using local: %s", exc)
+        return local_doc
 
     async def is_premium_guild(self, guild_id: int) -> bool:
         gid = int(guild_id)
@@ -1027,7 +1114,10 @@ class Premium(commands.Cog):
 
     @vanity_scan_task.before_loop
     async def before_vanity_scan(self):
-        await self.bot.wait_until_ready()
+        try:
+            await self.bot.wait_until_ready()
+        except RuntimeError:
+            pass
 
     # ══════════════════════════════════════════════════════════════
     # COMMANDS
@@ -1429,30 +1519,92 @@ class Premium(commands.Cog):
             ephemeral=True,
         )
 
+    @app_commands.command(name="premium_revoke", description="Revoke Server Premium from a Discord server (bot owner only)")
+    @app_commands.describe(guild_id="Numeric Discord server ID")
+    @app_commands.check(_is_nexora_owner)
+    async def premium_revoke_slash(self, interaction: discord.Interaction, guild_id: str):
+        try:
+            gid = int(guild_id.strip())
+        except (ValueError, AttributeError):
+            return await interaction.response.send_message("Guild ID must be a numeric Discord server ID.", ephemeral=True)
+
+        now = utcnow()
+        if self.col_server is not None:
+            try:
+                await self.col_server.update_one(
+                    {"_id": gid},
+                    {"$set": {"tier": "FREE", "expires_at": now, "revoked_at": now.isoformat()}},
+                    upsert=True,
+                )
+            except Exception as exc:
+                logger.error("Could not revoke premium in MongoDB: %s", exc)
+                return await interaction.response.send_message(
+                    "Database could not save the revocation; the grant remains unchanged.",
+                    ephemeral=True,
+                )
+
+        try:
+            self._save_local_server_subscription(gid, "FREE", now, revoked_at=now.isoformat())
+        except Exception as exc:
+            if self.col_server is None:
+                logger.error("Could not revoke premium in local storage: %s", exc)
+                return await interaction.response.send_message("Could not save the revocation.", ephemeral=True)
+            logger.warning("Could not mirror premium revocation into local JSON: %s", exc)
+
+        self.bot.premium_guild_ids.discard(gid)
+        self.bot.premium_guild_tiers.pop(gid, None)
+        await interaction.response.send_message(f"Revoked server premium from {gid}.", ephemeral=True)
+
     @commands.command(name="set_user_vip")
     @commands.is_owner()
     async def set_user_vip(self, ctx: commands.Context, user: discord.User, tier: str = "VIP_PLUS", days: int = 30):
         """[Owner] Grant or update personal User VIP subscription."""
-        if self.col_user is None:
-            return await ctx.send("❌ MongoDB not connected.")
         tier = tier.upper()
-        if tier not in USER_TIERS:
-            return await ctx.send(f"❌ Unknown tier. Valid: `{' | '.join(USER_TIERS)}`")
+        if tier not in USER_TIERS or tier == "FREE":
+            return await ctx.send(f"❌ Unknown tier. Valid: `{' | '.join(k for k in USER_TIERS if k != 'FREE')}`")
+        if days != -1 and days < 1:
+            return await ctx.send("Duration must be at least 1 day, or -1 for permanent.")
 
         expires = None if days == -1 else utcnow() + timedelta(days=days)
-        await self.col_user.update_one(
-            {"_id": user.id},
-            {"$set": {
-                "tier":         tier,
-                "expires_at":   expires,
-                "activated_at": utcnow(),
-                "server_passes": USER_TIERS[tier]["features"].get("server_passes", 0),
-            }},
-            upsert=True,
-        )
+        server_passes = USER_TIERS[tier]["features"].get("server_passes", 0)
+        metadata = {
+            "tier": tier,
+            "expires_at": expires,
+            "activated_at": utcnow().isoformat(),
+            "server_passes": server_passes,
+        }
+
+        if self.col_user is not None:
+            try:
+                await self.col_user.update_one(
+                    {"_id": user.id},
+                    {"$set": metadata},
+                    upsert=True,
+                )
+            except Exception as exc:
+                logger.error("Mongo set_user_vip failed: %s", exc)
+                return await ctx.send("MongoDB could not save the VIP grant.")
+
+        try:
+            self._save_local_user_subscription(
+                user.id, tier, expires,
+                activated_at=utcnow().isoformat(),
+                server_passes=server_passes,
+            )
+        except Exception as exc:
+            if self.col_user is None:
+                logger.error("Failed saving local user VIP grant: %s", exc)
+                return await ctx.send("Could not save VIP to local storage.")
+            logger.warning("Could not mirror user VIP grant locally: %s", exc)
+
         self.bot.premium_user_ids.add(user.id)
         self.bot.premium_user_tiers[user.id] = tier
-        await ctx.send(f"✅ Set User VIP for {user.mention} (`{user.id}`) to **{tier}** ({'Permanent' if days == -1 else f'{days}d'}).")
+        warning = ""
+        if self.col_user is None:
+            warning = "\n\n⚠️ Note: MongoDB is not connected. The VIP entitlement is saved to local storage."
+        await ctx.send(f"✅ Set User VIP for {user.mention} (`{user.id}`) to **{tier}** ({'Permanent' if days == -1 else f'{days}d'}).{warning}")
+
+
 
     @commands.command(name="revoke_premium")
     @commands.is_owner()
@@ -1496,10 +1648,29 @@ class Premium(commands.Cog):
     @commands.is_owner()
     async def revoke_user_vip(self, ctx: commands.Context, user: discord.User):
         """[Owner] Revoke user VIP."""
-        await self.col_user.update_one({"_id": user.id}, {"$set": {"tier": "FREE", "expires_at": utcnow()}}, upsert=True)
+        now = utcnow()
+        if self.col_user is not None:
+            try:
+                await self.col_user.update_one(
+                    {"_id": user.id},
+                    {"$set": {"tier": "FREE", "expires_at": now, "revoked_at": now.isoformat()}},
+                    upsert=True,
+                )
+            except Exception as exc:
+                logger.error("Mongo revoke_user_vip failed: %s", exc)
+                return await ctx.send("Database could not save the revocation.")
+
+        try:
+            self._save_local_user_subscription(user.id, "FREE", now, revoked_at=now.isoformat())
+        except Exception as exc:
+            if self.col_user is None:
+                logger.error("Could not revoke user VIP in local storage: %s", exc)
+                return await ctx.send("Could not save user VIP revocation.")
+            logger.warning("Could not mirror user VIP revocation into local JSON: %s", exc)
+
         self.bot.premium_user_ids.discard(user.id)
         self.bot.premium_user_tiers.pop(user.id, None)
-        await ctx.send(f"✅ Revoked VIP from {user.mention}.")
+        await ctx.send(f"✅ Revoked VIP from {user.mention} (`{user.id}`).")
 
 
 async def setup(bot: commands.Bot):
