@@ -239,6 +239,10 @@ class ErrorHandler(commands.Cog):
             )
             await self.send_error(interaction, view)
 
+        elif isinstance(error, discord.NotFound) and getattr(error, "code", None) == 10062:
+            logger.warning("Interaction expired or was handled by another instance (code 10062: Unknown interaction).")
+            return
+
         else:
             cmd_name = interaction.command.name if interaction.command else "Unknown"
             view = self.create_error_view(

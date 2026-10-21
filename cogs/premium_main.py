@@ -1242,10 +1242,17 @@ class Premium(commands.Cog):
             )
 
         # Defer immediately to give async MongoDB / fallback lookup plenty of time
-        await interaction.response.defer(ephemeral=False)
+        try:
+            await interaction.response.defer(ephemeral=False)
+        except (discord.NotFound, discord.InteractionResponded):
+            pass
+
         doc = await self.get_server_doc(interaction.guild.id)
         panel = ServerControlHubView(self, interaction.guild, doc, interaction.user)
-        await interaction.followup.send(embed=panel.get_overview_embed(), view=panel)
+        try:
+            await interaction.followup.send(embed=panel.get_overview_embed(), view=panel)
+        except discord.NotFound:
+            pass
 
     @commands.hybrid_command(name="premium_price", description="View Server Premium and User VIP plans and pricing calculator", aliases=["plans", "upgrade"])
     async def premium_price(self, ctx: commands.Context):
