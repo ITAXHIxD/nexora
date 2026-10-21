@@ -20,7 +20,6 @@ from cogs.utility.quote import Quote, parse_message_link
 from utils.quote_card import generate_quote_card
 from utils.quote_storage import (
     GuildQuoteSettings,
-    QuoteRecord,
     QuoteStorage,
     load_local_quotes_data,
     save_local_quotes_data,
@@ -66,7 +65,7 @@ class TestMessageLinkParsing(unittest.TestCase):
 
 
 class TestQuoteStorage(unittest.IsolatedAsyncioTestCase):
-    """Test quote persistence and settings storage with local JSON fallback."""
+    """Test quote settings persistence with local JSON fallback."""
 
     async def asyncSetUp(self):
         self.test_dir = tempfile.mkdtemp()
@@ -105,45 +104,13 @@ class TestQuoteStorage(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(loaded.log_channel_id, 444)
         self.assertEqual(loaded.render_style, "card")
 
-    async def test_quote_record_add_get_and_delete(self):
+    async def test_quote_counter_increment(self):
         guild_id = 99999
-        record = QuoteRecord(
-            quote_id="abc12345",
-            guild_id=guild_id,
-            source_channel_id=101,
-            source_message_id=202,
-            quote_channel_id=303,
-            quote_message_id=404,
-            quoter_id=505,
-            author_id=606,
-            jump_url="https://discord.com/channels/99999/101/202",
-            content_preview="This is a memorable quote!",
-            has_image=False,
-        )
+        await self.storage.increment_quote_count(guild_id)
+        await self.storage.increment_quote_count(guild_id)
 
-        await self.storage.add_quote(record)
-
-        # Get by quote_id
-        fetched = await self.storage.get_quote("abc12345")
-        self.assertIsNotNone(fetched)
-        self.assertEqual(fetched.quote_id, "abc12345")
-        self.assertEqual(fetched.quoter_id, 505)
-        self.assertEqual(fetched.content_preview, "This is a memorable quote!")
-
-        # Get by message_id
-        fetched_by_msg = await self.storage.get_quote_by_message(guild_id, 404)
-        self.assertIsNotNone(fetched_by_msg)
-        self.assertEqual(fetched_by_msg.quote_id, "abc12345")
-
-        # Total count
-        count = await self.storage.get_guild_quotes_count(guild_id)
-        self.assertEqual(count, 1)
-
-        # Delete
-        deleted = await self.storage.delete_quote("abc12345")
-        self.assertTrue(deleted)
-        self.assertIsNone(await self.storage.get_quote("abc12345"))
-        self.assertEqual(await self.storage.get_guild_quotes_count(guild_id), 0)
+        loaded = await self.storage.get_settings(guild_id)
+        self.assertEqual(loaded.quotes_count, 2)
 
 
 class TestQuoteCardGeneration(unittest.TestCase):
@@ -219,7 +186,7 @@ class TestQuoteCardGeneration(unittest.TestCase):
 
 
 class TestQuotePermissionsAndRemoval(unittest.IsolatedAsyncioTestCase):
-    """Test permission validation, unauthorized removal denials, and privacy checks."""
+    """Test permission validation, stateless removal denials, and privacy checks."""
 
     async def asyncSetUp(self):
         self.test_dir = tempfile.mkdtemp()
@@ -244,16 +211,6 @@ class TestQuotePermissionsAndRemoval(unittest.IsolatedAsyncioTestCase):
         quote_msg_id = 2000
         quoter_id = 5000
 
-        record = QuoteRecord(
-            quote_id="test0001",
-            guild_id=guild_id,
-            quote_message_id=quote_msg_id,
-            quoter_id=quoter_id,
-            source_channel_id=10,
-            source_message_id=20,
-        )
-        await self.cog.storage.add_quote(record)
-
         # Mock interaction by the quote owner
         mock_interaction = MagicMock()
         mock_interaction.guild = MagicMock(id=guild_id)
@@ -262,28 +219,19 @@ class TestQuotePermissionsAndRemoval(unittest.IsolatedAsyncioTestCase):
         mock_interaction.user.guild_permissions = SimpleNamespace(manage_messages=False, administrator=False)
         mock_interaction.response = MagicMock(send_message=AsyncMock())
 
-        await self.cog.handle_quote_removal(mock_interaction)
+        custom_id = f"quote:delete:{quoter_id}"
+        await self.cog.handle_quote_removal(mock_interaction, custom_id)
 
         # Verify message deleted and response is success
         mock_interaction.message.delete.assert_called_once()
         mock_interaction.response.send_message.assert_called_once()
         self.assertIn("Quote successfully removed", mock_interaction.response.send_message.call_args[0][0])
-        # Verify deleted from storage
-        self.assertIsNone(await self.cog.storage.get_quote("test0001"))
 
     async def test_moderator_removal_authorized(self):
         guild_id = 1000
         quote_msg_id = 2001
         quoter_id = 5000
         mod_id = 9000
-
-        record = QuoteRecord(
-            quote_id="test0002",
-            guild_id=guild_id,
-            quote_message_id=quote_msg_id,
-            quoter_id=quoter_id,
-        )
-        await self.cog.storage.add_quote(record)
 
         # Mock interaction by a moderator
         mock_interaction = MagicMock()
@@ -293,12 +241,12 @@ class TestQuotePermissionsAndRemoval(unittest.IsolatedAsyncioTestCase):
         mock_interaction.user.guild_permissions = SimpleNamespace(manage_messages=True, administrator=False)
         mock_interaction.response = MagicMock(send_message=AsyncMock())
 
-        await self.cog.handle_quote_removal(mock_interaction)
+        custom_id = f"quote:delete:{quoter_id}"
+        await self.cog.handle_quote_removal(mock_interaction, custom_id)
 
         # Verify message deleted
         mock_interaction.message.delete.assert_called_once()
         self.assertIn("Quote successfully removed", mock_interaction.response.send_message.call_args[0][0])
-        self.assertIsNone(await self.cog.storage.get_quote("test0002"))
 
     async def test_unauthorized_user_removal_denied(self):
         guild_id = 1000
@@ -306,23 +254,16 @@ class TestQuotePermissionsAndRemoval(unittest.IsolatedAsyncioTestCase):
         quoter_id = 5000
         random_user_id = 7777
 
-        record = QuoteRecord(
-            quote_id="test0003",
-            guild_id=guild_id,
-            quote_message_id=quote_msg_id,
-            quoter_id=quoter_id,
-        )
-        await self.cog.storage.add_quote(record)
-
         # Mock interaction by unrelated user
         mock_interaction = MagicMock()
         mock_interaction.guild = MagicMock(id=guild_id)
-        mock_interaction.message = MagicMock(id=quote_msg_id, delete=AsyncMock())
+        mock_interaction.message = MagicMock(id=quote_msg_id, delete=AsyncMock(), embeds=[])
         mock_interaction.user = MagicMock(id=random_user_id)
         mock_interaction.user.guild_permissions = SimpleNamespace(manage_messages=False, administrator=False)
         mock_interaction.response = MagicMock(send_message=AsyncMock())
 
-        await self.cog.handle_quote_removal(mock_interaction)
+        custom_id = f"quote:delete:{quoter_id}"
+        await self.cog.handle_quote_removal(mock_interaction, custom_id)
 
         # Verify message was NOT deleted
         mock_interaction.message.delete.assert_not_called()
@@ -330,8 +271,6 @@ class TestQuotePermissionsAndRemoval(unittest.IsolatedAsyncioTestCase):
         mock_interaction.response.send_message.assert_called_once()
         sent_text = mock_interaction.response.send_message.call_args[0][0]
         self.assertIn("Only the member who created this quote or a server moderator", sent_text)
-        # Verify quote record still exists
-        self.assertIsNotNone(await self.cog.storage.get_quote("test0003"))
 
     async def test_channel_privacy_check_blocks_inaccessible_messages(self):
         """User cannot quote from a channel they cannot read."""

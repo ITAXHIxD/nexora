@@ -9,14 +9,15 @@ Features:
   • /quote send [link], prefix n!quote (with replied-to message or link),
     and native Discord Message Context Menu: Apps ➔ "Quote Message".
   • Real Discord jump link to the source message.
-  • Interactive [ 🗑️ Remove my Quote ] persistent button with strict
-    ownership validation and moderator override.
+  • Stateless [ 🗑️ Remove my Quote ] button: quoter user ID is encoded
+    directly in the button custom_id (quote:delete:<user_id>).
+    Strict ownership verification and moderator override with zero database bloat.
   • Full administrator configuration panel (/quote settings, /quote channel,
     /quote toggle, /quote exclude, /quote logchannel).
   • Permission validation & channel privacy protection: users cannot quote
     from channels they lack permission to view.
   • Mass-mention suppression (disallows @everyone, @here, and role pings).
-  • Dual persistence: MongoDB Atlas + local JSON fallback.
+  • Lightweight server settings persistence (MongoDB + local JSON fallback).
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
@@ -25,7 +26,7 @@ import io
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple
 
 import aiohttp
 import discord
@@ -33,14 +34,13 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils.quote_card import generate_quote_card
-from utils.quote_storage import GuildQuoteSettings, QuoteRecord, QuoteStorage
+from utils.quote_storage import GuildQuoteSettings, QuoteStorage
 from utils.ui import (
     BRAND_COLOR,
     ERROR_COLOR,
     SUCCESS_COLOR,
     WARNING_COLOR,
     CYAN_COLOR,
-    ts_format,
 )
 
 logger = logging.getLogger(__name__)
@@ -65,38 +65,22 @@ def parse_message_link(link: str) -> Optional[Tuple[int, int, int]]:
     return int(raw_guild), int(raw_channel), int(raw_message)
 
 
-class PersistentQuoteView(discord.ui.View):
+class QuoteCardView(discord.ui.View):
     """
-    Persistent view for quote removal across bot restarts.
-    Handles both fixed custom_id 'quote:remove_my_quote' and dynamic IDs.
+    Stateless view attached to each posted quote card.
+    Encodes the quoter's user ID directly into the button custom_id.
     """
 
-    def __init__(self, cog: Optional["Quote"] = None):
+    def __init__(self, quoter_id: int):
         super().__init__(timeout=None)
-        self.cog = cog
-
-    @discord.ui.button(
-        label="Remove my Quote",
-        emoji="🗑️",
-        style=discord.ButtonStyle.secondary,
-        custom_id="quote:remove_my_quote",
-    )
-    async def remove_quote_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ):
-        if self.cog is not None:
-            await self.cog.handle_quote_removal(interaction)
-        else:
-            # Fallback if cog not directly attached
-            bot = interaction.client
-            cog = bot.get_cog("Quote")
-            if cog:
-                await cog.handle_quote_removal(interaction)
-            else:
-                await interaction.response.send_message(
-                    "❌ Quote service is currently reloading. Please try again in a moment.",
-                    ephemeral=True,
-                )
+        self.add_item(
+            discord.ui.Button(
+                label="Remove my Quote",
+                emoji="🗑️",
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"quote:delete:{quoter_id}",
+            )
+        )
 
 
 class QuoteSettingsView(discord.ui.View):
@@ -178,8 +162,7 @@ class QuoteSettingsView(discord.ui.View):
             diag_lines.append("ℹ️ **Destination Channel:** Not configured (Quotes post in command channel)")
 
         diag_lines.append(f"**Quote System:** {'🟢 Active' if settings.enabled else '🔴 Disabled'}")
-        quotes_count = await self.cog.storage.get_guild_quotes_count(self.guild_id)
-        diag_lines.append(f"**Total Quotes Stored:** `{quotes_count}`")
+        diag_lines.append(f"**Total Quotes Created:** `{settings.quotes_count}`")
 
         diag_embed = discord.Embed(
             title="🔍 Quote System Diagnostics",
@@ -199,8 +182,6 @@ class Quote(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.storage = QuoteStorage(bot)
-        self.persistent_view = PersistentQuoteView(self)
-        self.bot.add_view(self.persistent_view)
 
         # Context menu registration (Message context menu)
         self.ctx_menu = app_commands.ContextMenu(
@@ -214,6 +195,16 @@ class Quote(commands.Cog):
             self.bot.tree.remove_command(self.ctx_menu.name, type=self.ctx_menu.type)
         except Exception as exc:
             logger.debug("Error removing quote context menu: %s", exc)
+
+    # ── Stateless Button Listener ──────────────────────────────────────────────
+
+    @commands.Cog.listener()
+    async def on_interaction(self, interaction: discord.Interaction):
+        """Dispatches quote deletion interactions with zero database overhead."""
+        if interaction.type == discord.InteractionType.component:
+            custom_id = interaction.data.get("custom_id", "")
+            if custom_id.startswith("quote:delete:"):
+                await self.handle_quote_removal(interaction, custom_id)
 
     # ── Context Menu Callback ──────────────────────────────────────────────────
 
@@ -232,39 +223,35 @@ class Quote(commands.Cog):
 
     # ── Removal Handling ───────────────────────────────────────────────────────
 
-    async def handle_quote_removal(self, interaction: discord.Interaction):
-        """Processes the [ 🗑️ Remove my Quote ] button click."""
+    async def handle_quote_removal(
+        self, interaction: discord.Interaction, custom_id: str
+    ):
+        """
+        Processes the [ 🗑️ Remove my Quote ] button click statelessly.
+        Extracts quoter_id directly from custom_id: quote:delete:<quoter_id>.
+        """
         if not interaction.guild:
             await interaction.response.send_message(
                 "❌ Quotes can only be managed within a server.", ephemeral=True
             )
             return
 
-        msg_id = interaction.message.id if interaction.message else None
-        if not msg_id:
-            await interaction.response.send_message(
-                "❌ Could not identify the quote message.", ephemeral=True
-            )
-            return
-
-        quote = await self.storage.get_quote_by_message(interaction.guild.id, msg_id)
+        raw_id = custom_id.split("quote:delete:")[-1]
+        quoter_id = int(raw_id) if raw_id.isdigit() else 0
 
         user = interaction.user
-        is_owner = False
+        is_owner = user.id == quoter_id
         is_mod = (
             user.guild_permissions.manage_messages
             or user.guild_permissions.administrator
             or user.id == self.bot.owner_id
         )
 
-        if quote:
-            is_owner = user.id == quote.quoter_id
-        else:
-            # Check embed footer for legacy fallback
-            if interaction.message.embeds:
-                emb = interaction.message.embeds[0]
-                if emb.footer and emb.footer.text and f"Quoted by {user.display_name}" in emb.footer.text:
-                    is_owner = True
+        # Check footer fallback for legacy quotes if quoter_id is 0
+        if not is_owner and interaction.message and interaction.message.embeds:
+            emb = interaction.message.embeds[0]
+            if emb.footer and emb.footer.text and f"Quoted by {user.display_name}" in emb.footer.text:
+                is_owner = True
 
         if not is_owner and not is_mod:
             await interaction.response.send_message(
@@ -291,41 +278,31 @@ class Quote(commands.Cog):
             )
             return
 
-        # Remove from storage if record exists
-        if quote:
-            await self.storage.delete_quote(quote.quote_id)
-
-            # Audit / Moderation logging
-            settings = await self.storage.get_settings(interaction.guild.id)
-            if settings.log_channel_id:
-                log_chan = interaction.guild.get_channel(settings.log_channel_id)
-                if log_chan and log_chan.permissions_for(interaction.guild.me).send_messages:
-                    log_embed = discord.Embed(
-                        title="🗑️ Quote Removed",
-                        color=WARNING_COLOR,
-                        timestamp=datetime.now(timezone.utc),
-                    )
-                    log_embed.add_field(
-                        name="Removed By",
-                        value=f"{user.mention} (`{user.id}`)" + (" [Moderator]" if is_mod and not is_owner else ""),
-                        inline=True,
-                    )
+        # Audit / Moderation logging if configured
+        settings = await self.storage.get_settings(interaction.guild.id)
+        if settings.log_channel_id:
+            log_chan = interaction.guild.get_channel(settings.log_channel_id)
+            if log_chan and log_chan.permissions_for(interaction.guild.me).send_messages:
+                log_embed = discord.Embed(
+                    title="🗑️ Quote Removed",
+                    color=WARNING_COLOR,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                log_embed.add_field(
+                    name="Removed By",
+                    value=f"{user.mention} (`{user.id}`)" + (" [Moderator]" if is_mod and not is_owner else ""),
+                    inline=True,
+                )
+                if quoter_id:
                     log_embed.add_field(
                         name="Original Quoter",
-                        value=f"<@{quote.quoter_id}> (`{quote.quoter_id}`)",
+                        value=f"<@{quoter_id}> (`{quoter_id}`)",
                         inline=True,
                     )
-                    if quote.content_preview:
-                        log_embed.add_field(
-                            name="Quote Preview",
-                            value=f"_{quote.content_preview[:150]}_",
-                            inline=False,
-                        )
-                    log_embed.set_footer(text=f"Quote ID: {quote.quote_id}")
-                    try:
-                        await log_chan.send(embed=log_embed)
-                    except Exception:
-                        pass
+                try:
+                    await log_chan.send(embed=log_embed)
+                except Exception:
+                    pass
 
         await interaction.response.send_message(
             "✅ Quote successfully removed.", ephemeral=True
@@ -360,8 +337,6 @@ class Quote(commands.Cog):
             else "`Disabled`"
         )
 
-        quotes_count = await self.storage.get_guild_quotes_count(guild.id)
-
         embed = discord.Embed(
             title="⚙️ Quote System Configuration",
             description=f"Server configuration and controls for **{guild.name}**.",
@@ -374,7 +349,7 @@ class Quote(commands.Cog):
         embed.add_field(name="Allowed Quoter Roles", value=roles_desc, inline=False)
         embed.add_field(name="Excluded Channels", value=excluded_desc, inline=False)
         embed.add_field(name="Moderation Log Channel", value=log_desc, inline=True)
-        embed.add_field(name="Saved Quotes", value=f"`{quotes_count}` quotes", inline=True)
+        embed.add_field(name="Total Quotes Sent", value=f"`{settings.quotes_count}` quotes", inline=True)
 
         embed.set_footer(
             text="Use the buttons below or slash commands like /quote channel to configure."
@@ -391,7 +366,7 @@ class Quote(commands.Cog):
         respond_func,
         is_interaction: bool = False,
     ):
-        """Validates permissions, renders the quote card/embed, posts it, and persists metadata."""
+        """Validates permissions, renders the quote card/embed, posts it, and persists settings."""
         if not guild:
             await respond_func("❌ Quotes can only be generated within a server.")
             return
@@ -490,7 +465,6 @@ class Quote(commands.Cog):
         jump_url = f"https://discord.com/channels/{guild.id}/{source_channel.id}/{source_message.id}"
 
         # 8. Render Quote Card / Embed
-        quote_id = QuoteRecord().quote_id
         timestamp_str = source_message.created_at.strftime("%b %d, %Y")
         channel_name = getattr(source_channel, "name", "channel")
 
@@ -508,7 +482,7 @@ class Quote(commands.Cog):
                     timestamp_str=timestamp_str,
                 )
                 if card_buf:
-                    quote_file = discord.File(card_buf, filename=f"quote_{quote_id}.png")
+                    quote_file = discord.File(card_buf, filename="quote.png")
             except Exception as e:
                 logger.error("PIL card generation failed, falling back to embed: %s", e)
                 quote_file = None
@@ -535,9 +509,8 @@ class Quote(commands.Cog):
         )
 
         if quote_file:
-            embed.set_image(url=f"attachment://quote_{quote_id}.png")
+            embed.set_image(url="attachment://quote.png")
         elif has_image and source_message.attachments:
-            # Set the image to the first attachment url
             embed.set_image(url=source_message.attachments[0].url)
 
         # Author and Footer
@@ -552,8 +525,8 @@ class Quote(commands.Cog):
             icon_url=user.display_avatar.url,
         )
 
-        # 9. Interactive view with [ 🗑️ Remove my Quote ]
-        view = PersistentQuoteView(self)
+        # 9. Stateless interactive view with [ 🗑️ Remove my Quote ]
+        view = QuoteCardView(quoter_id=user.id)
 
         # Post the quote to destination channel
         # Suppress all unintended mass pings from quoted content
@@ -585,22 +558,8 @@ class Quote(commands.Cog):
             await respond_func(f"❌ Failed to post quote: {exc}")
             return
 
-        # 10. Save quote metadata
-        record = QuoteRecord(
-            quote_id=quote_id,
-            guild_id=guild.id,
-            source_channel_id=source_channel.id,
-            source_message_id=source_message.id,
-            quote_channel_id=dest_channel.id,
-            quote_message_id=posted_msg.id,
-            quoter_id=user.id,
-            author_id=author.id,
-            created_at=datetime.now(timezone.utc).isoformat(),
-            jump_url=jump_url,
-            content_preview=content[:200],
-            has_image=has_image,
-        )
-        await self.storage.add_quote(record)
+        # 10. Increment lightweight server quote counter
+        await self.storage.increment_quote_count(guild.id)
 
         # 11. Send feedback to quoter
         posted_link = f"https://discord.com/channels/{guild.id}/{dest_channel.id}/{posted_msg.id}"
@@ -609,7 +568,6 @@ class Quote(commands.Cog):
         if is_interaction:
             await respond_func(confirm_msg, ephemeral=True)
         else:
-            # If in the same channel, don't spam duplicate confirmation
             if dest_channel.id != source_channel.id:
                 try:
                     await respond_func(confirm_msg)
@@ -633,7 +591,6 @@ class Quote(commands.Cog):
                     value=f"[Original Message]({jump_url}) • [Quote Card]({posted_link})",
                     inline=False,
                 )
-                log_embed.set_footer(text=f"Quote ID: {quote_id}")
                 try:
                     await log_chan.send(embed=log_embed)
                 except Exception:
