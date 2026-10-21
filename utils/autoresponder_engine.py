@@ -82,7 +82,9 @@ class AutoResponderItem:
     replies: List[str] = field(default_factory=list)
     embeds: List[Dict[str, Any]] = field(default_factory=list)
     reactions: List[str] = field(default_factory=list)
+    trigger_reaction: Optional[str] = None
     reply_to_message: bool = True
+    ping_user: bool = False
     mention_author: bool = False
     allowed_mentions: bool = False
     delete_trigger: bool = False
@@ -104,13 +106,32 @@ class AutoResponderItem:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AutoResponderItem":
+        # Resolve ping_user / mention_author
+        raw_ping = data.get("ping_user")
+        if raw_ping is None:
+            raw_ping = data.get("mention_author", False)
+        ping_val = bool(raw_ping)
+
+        # Resolve trigger_reaction / reactions
+        raw_rx = data.get("trigger_reaction")
+        if not raw_rx and "reactions" in data and isinstance(data["reactions"], list) and data["reactions"]:
+            raw_rx = data["reactions"][0]
+        reaction_val = (
+            str(raw_rx).strip()
+            if raw_rx and str(raw_rx).strip().lower() not in ("none", "off", "disable", "disabled", "false")
+            else None
+        )
+
         item = cls(
             id=str(data.get("id") or str(uuid.uuid4())[:8]),
             name=str(data.get("name") or ""),
             match_mode=str(data.get("match_mode", "contains")).lower(),
             case_sensitive=bool(data.get("case_sensitive", False)),
             reply_to_message=bool(data.get("reply_to_message", True)),
-            mention_author=bool(data.get("mention_author", False)),
+            ping_user=ping_val,
+            mention_author=ping_val,
+            trigger_reaction=reaction_val,
+            reactions=[reaction_val] if reaction_val else [],
             allowed_mentions=bool(data.get("allowed_mentions", False)),
             delete_trigger=bool(data.get("delete_trigger", False)),
             delay_seconds=float(data.get("delay_seconds", 0.0)),
@@ -181,9 +202,11 @@ class AutoResponderItem:
             "replies": self.replies,
             "reply": self.replies[0] if self.replies else "",
             "embeds": self.embeds,
-            "reactions": self.reactions,
+            "reactions": [self.trigger_reaction] if self.trigger_reaction else self.reactions,
+            "trigger_reaction": self.trigger_reaction,
             "reply_to_message": self.reply_to_message,
-            "mention_author": self.mention_author,
+            "ping_user": self.ping_user,
+            "mention_author": self.ping_user,
             "allowed_mentions": self.allowed_mentions,
             "delete_trigger": self.delete_trigger,
             "delay_seconds": self.delay_seconds,
@@ -213,6 +236,7 @@ class GuildAutoResponderSettings:
     ignored_channels: List[int] = field(default_factory=list)
     ignored_roles: List[int] = field(default_factory=list)
     default_cooldown: float = 3.0
+    default_ping: bool = False
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "GuildAutoResponderSettings":
@@ -222,6 +246,7 @@ class GuildAutoResponderSettings:
             ignored_channels=[int(c) for c in data.get("ignored_channels", []) if str(c).isdigit()],
             ignored_roles=[int(r) for r in data.get("ignored_roles", []) if str(r).isdigit()],
             default_cooldown=float(data.get("default_cooldown", 3.0)),
+            default_ping=bool(data.get("default_ping", False)),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -231,6 +256,7 @@ class GuildAutoResponderSettings:
             "ignored_channels": self.ignored_channels,
             "ignored_roles": self.ignored_roles,
             "default_cooldown": self.default_cooldown,
+            "default_ping": self.default_ping,
         }
 
 

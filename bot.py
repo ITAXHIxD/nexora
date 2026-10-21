@@ -64,10 +64,24 @@ if hasattr(sys.stdout, "buffer") and sys.stdout.buffer is not None:
 if hasattr(sys.stderr, "buffer") and sys.stderr.buffer is not None:
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+class CleanConsoleFilter(logging.Filter):
+    """Filter out benign library warnings to keep terminal logs clean and readable."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "PyNaCl is not installed" in msg or "davey is not installed" in msg:
+            return False
+        return True
+
+_console_handler = logging.StreamHandler(sys.stdout)
+_console_handler.setFormatter(
+    logging.Formatter("[%(asctime)s] [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S")
 )
+_console_handler.addFilter(CleanConsoleFilter())
+
+_root_logger = logging.getLogger()
+_root_logger.setLevel(logging.INFO)
+_root_logger.handlers = [_console_handler]
+
 # Suppress spammy low-level library logs
 for noisy in ("discord", "discord.http", "discord.gateway", "discord.client", "aiohttp.access", "aiohttp.client"):
     logging.getLogger(noisy).setLevel(logging.WARNING)
@@ -98,6 +112,7 @@ CREATIVE_ACTIVITIES = [
     {"type": discord.ActivityType.playing, "name": "with {user_count} friends across {server_count} servers"},
     {"type": discord.ActivityType.playing, "name": "chess with quantum algorithms"},
     {"type": discord.ActivityType.playing, "name": "Truth or Dare | n!tod & n!truth"},
+    {"type": discord.ActivityType.playing, "name": "Confession game | n!confe"},
     {"type": discord.ActivityType.playing, "name": "Would You Rather | n!wyr"},
     {"type": discord.ActivityType.playing, "name": "Rock Paper Scissors | n!rps"},
     {"type": discord.ActivityType.playing, "name": "Tic-Tac-Toe championship | n!ttt"},
@@ -130,10 +145,10 @@ CREATIVE_ACTIVITIES = [
     # ── Watching ──
     {"type": discord.ActivityType.watching, "name": "over {user_count} incredible souls"},
     {"type": discord.ActivityType.watching, "name": "{server_count} servers thrive & grow"},
+    {"type": discord.ActivityType.watching, "name": "CyberPunk S2 | Tears of Steel"},
     {"type": discord.ActivityType.watching, "name": "One Piece episode {random_ep}"},
-    {"type": discord.ActivityType.watching, "name": "Jujutsu Kaisen Season 3 leaks"},
-    {"type": discord.ActivityType.watching, "name": "Demon Slayer: Infinity Castle arc"},
-    {"type": discord.ActivityType.watching, "name": "Chainsaw Man in IMAX 3D"},
+    {"type": discord.ActivityType.watching, "name": "Jujutsu Kaisen Season kitkat leaks"},
+    {"type": discord.ActivityType.watching, "name": "One Piece Movie: God Valley"},
     {"type": discord.ActivityType.watching, "name": "the multiverse unfold"},
     {"type": discord.ActivityType.watching, "name": "for spam and rule breakers"},
     {"type": discord.ActivityType.watching, "name": "the audit logs closely"},
@@ -154,9 +169,11 @@ CREATIVE_ACTIVITIES = [
 
     # ── Listening ──
     {"type": discord.ActivityType.listening, "name": "the echo of {user_count} voices"},
+    {"type": discord.ActivityType.listening, "name": "Makima is Listening"},
     {"type": discord.ActivityType.listening, "name": "whispers from other dimensions"},
     {"type": discord.ActivityType.listening, "name": "phonk drift music at 3 AM"},
     {"type": discord.ActivityType.listening, "name": "anime opening themes on blast"},
+    {"type": discord.ActivityType.listening, "name": "OverTaken"},
     {"type": discord.ActivityType.listening, "name": "smooth city pop from Tokyo 1986"},
     {"type": discord.ActivityType.listening, "name": "lo-fi beats to grind commands to"},
     {"type": discord.ActivityType.listening, "name": "voice channel karaoke sessions"},

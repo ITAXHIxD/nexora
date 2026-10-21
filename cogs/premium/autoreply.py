@@ -56,11 +56,156 @@ from utils.ui import (
 logger = logging.getLogger(__name__)
 
 
+class AutoresponderCreateModal(discord.ui.Modal, title="Create Autoresponder"):
+    """Interactive Discord modal for creating an autoresponder."""
+
+    def __init__(self, cog: "AutoResponder", guild: discord.Guild, author_id: int):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.guild = guild
+        self.author_id = author_id
+
+    trigger_input = discord.ui.TextInput(
+        label="Trigger Keyword(s)",
+        placeholder="e.g. hello, hey (comma-separated)",
+        max_length=200,
+        required=True,
+    )
+    reply_input = discord.ui.TextInput(
+        label="Response Text",
+        style=discord.TextStyle.paragraph,
+        placeholder="Response text (supports {user}, {server}, {channel}, etc.)",
+        max_length=2000,
+        required=True,
+    )
+    match_mode_input = discord.ui.TextInput(
+        label="Match Mode",
+        placeholder="contains, exact, startswith, endswith, whole_word, regex",
+        default="contains",
+        max_length=20,
+        required=False,
+    )
+    ping_input = discord.ui.TextInput(
+        label="Ping Triggering User (ON / OFF)",
+        placeholder="ON or OFF (default: OFF)",
+        default="OFF",
+        max_length=10,
+        required=False,
+    )
+    reaction_input = discord.ui.TextInput(
+        label="Trigger Reaction (Emoji or None)",
+        placeholder="e.g. 👋, ⭐, or none",
+        default="none",
+        max_length=50,
+        required=False,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not await self.cog._is_premium(self.guild.id):
+            return await interaction.response.send_message(
+                "❌ **Premium Required**: Server subscription needed. Upgrade with `/premium_price`!",
+                ephemeral=True,
+            )
+
+        limit = await self.cog._get_tier_limit(self.guild.id)
+        settings, items = await self.cog._get_guild_cached(self.guild.id)
+        if limit != -1 and len(items) >= limit:
+            return await interaction.response.send_message(
+                f"❌ **Slot Limit Reached**: Your tier allows up to `{limit}` autoresponders.",
+                ephemeral=True,
+            )
+
+        mode_val = self.match_mode_input.value.strip().lower()
+        if mode_val not in VALID_MATCH_MODES:
+            mode_val = "contains"
+
+        tier = (
+            await self.cog.bot.get_premium_tier(self.guild.id)
+            if hasattr(self.cog.bot, "get_premium_tier")
+            else "BASIC"
+        )
+        if mode_val == "regex" and str(tier).upper() in ("FREE", "BASIC"):
+            return await interaction.response.send_message(
+                "❌ **Pro Perk**: Regular expression triggers require a **PRO** tier subscription.",
+                ephemeral=True,
+            )
+
+        raw_triggers = [t.strip() for t in self.trigger_input.value.split(",") if t.strip()]
+        if not raw_triggers:
+            return await interaction.response.send_message("❌ Trigger cannot be empty.", ephemeral=True)
+
+        for t in raw_triggers:
+            if len(t) > 100:
+                return await interaction.response.send_message(
+                    f"❌ Trigger `{t[:20]}…` exceeds 100 characters.", ephemeral=True
+                )
+            if mode_val == "regex":
+                is_valid, err = sanitize_regex(t)
+                if not is_valid:
+                    return await interaction.response.send_message(
+                        f"❌ Invalid regular expression: {err}", ephemeral=True
+                    )
+
+        clean_reply = self.reply_input.value.strip()
+        if not clean_reply or len(clean_reply) > 2000:
+            return await interaction.response.send_message(
+                "❌ Reply must contain between 1 and 2,000 characters.", ephemeral=True
+            )
+
+        for existing in items:
+            for t in raw_triggers:
+                if any(ext.casefold() == t.casefold() for ext in existing.triggers):
+                    return await interaction.response.send_message(
+                        f"⚠️ A responder matching `{t}` already exists (`{existing.name or existing.id}`).",
+                        ephemeral=True,
+                    )
+
+        ping_str = self.ping_input.value.strip().lower()
+        ping_val = ping_str in ("on", "true", "yes", "1", "enable", "enabled")
+
+        rx_str = self.reaction_input.value.strip()
+        rx_val = None
+        if rx_str and rx_str.lower() not in ("none", "off", "disable", "disabled", "false"):
+            rx_val = rx_str
+
+        new_item = AutoResponderItem(
+            id=str(uuid.uuid4())[:8],
+            name=raw_triggers[0][:30],
+            triggers=raw_triggers,
+            match_mode=mode_val,
+            replies=[clean_reply],
+            reply_to_message=True,
+            ping_user=ping_val,
+            mention_author=ping_val,
+            trigger_reaction=rx_val,
+            reactions=[rx_val] if rx_val else [],
+            created_by=self.author_id,
+        )
+
+        items.append(new_item)
+        await self.cog._update_guild_cache(self.guild.id, settings, items)
+
+        embed = discord.Embed(
+            title="✅ Autoresponder Created",
+            description=f"Responder **{new_item.name}** (`{new_item.id}`) is now active!",
+            color=SUCCESS_COLOR,
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.add_field(name="Triggers", value=", ".join(f"`{t}`" for t in raw_triggers), inline=True)
+        embed.add_field(name="Match Mode", value=f"`{mode_val}`", inline=True)
+        embed.add_field(name="Ping User", value="🔔 ON" if ping_val else "🔕 OFF", inline=True)
+        embed.add_field(name="Trigger Reaction", value=f"😃 `{rx_val}`" if rx_val else "*Disabled*", inline=True)
+        embed.add_field(name="Response Preview", value=f"\"{clean_reply[:150]}\"", inline=False)
+        embed.set_footer(text=f"Total: {len(items)} / {'Unlimited' if limit == -1 else limit}")
+        await interaction.response.send_message(embed=embed)
+
+
 class AutoresponderPaginationView(discord.ui.View):
-    """Interactive paginated view for browsing configured autoresponders."""
+    """Interactive paginated view for browsing and managing configured autoresponders."""
 
     def __init__(
         self,
+        cog: "AutoResponder",
         guild: discord.Guild,
         items: List[AutoResponderItem],
         limit_str: str,
@@ -68,6 +213,7 @@ class AutoresponderPaginationView(discord.ui.View):
         page_size: int = 5,
     ):
         super().__init__(timeout=120)
+        self.cog = cog
         self.guild = guild
         self.items = items
         self.limit_str = limit_str
@@ -75,9 +221,9 @@ class AutoresponderPaginationView(discord.ui.View):
         self.page_size = page_size
         self.current_page = 0
         self.total_pages = max(1, (len(items) + page_size - 1) // page_size)
-        self._update_buttons()
+        self._update_controls()
 
-    def _update_buttons(self):
+    def _update_controls(self):
         self.prev_button.disabled = self.current_page <= 0
         self.next_button.disabled = self.current_page >= self.total_pages - 1
 
@@ -96,7 +242,7 @@ class AutoresponderPaginationView(discord.ui.View):
         if not self.items:
             embed.description += (
                 "\n*No autoresponders configured yet!*\n"
-                "Use `/autoresponder add <trigger> <reply>` to create your first one."
+                "Use `/autoresponder add <trigger> <reply>` or click **➕ Add Responder** below."
             )
             return embed
 
@@ -110,15 +256,19 @@ class AutoresponderPaginationView(discord.ui.View):
                 triggers_str += f" *(+{len(item.triggers) - 3} more)*"
 
             reply_preview = (
-                item.replies[0][:60] + "…" if item.replies and len(item.replies[0]) > 60 else (item.replies[0] if item.replies else "*[Embed only]*")
+                item.replies[0][:60] + "…"
+                if item.replies and len(item.replies[0]) > 60
+                else (item.replies[0] if item.replies else "*[Embed only]*")
             )
             embed_badge = f" · 🖼️ `{len(item.embeds)} embed(s)`" if item.embeds else ""
-            rx_badge = f" · 😃 `{len(item.reactions)} reaction(s)`" if item.reactions else ""
+            rx_val = item.trigger_reaction or (item.reactions[0] if item.reactions else None)
+            rx_badge = f" · 😃 Reaction: `{rx_val}`" if rx_val else " · 😃 Reaction: `None`"
+            ping_badge = " · 🔔 Ping: `ON`" if item.ping_user else " · 🔕 Ping: `OFF`"
 
             details = [
-                f"• **Status:** {status} · **Mode:** `{item.match_mode}` · **Priority:** `{item.priority}`",
+                f"• **Status:** {status} · **Mode:** `{item.match_mode}`{ping_badge}{rx_badge}",
                 f"• **Triggers:** {triggers_str or '`None`'}",
-                f"• **Reply:** *\"{reply_preview}\"*{embed_badge}{rx_badge}",
+                f"• **Reply:** *\"{reply_preview}\"*{embed_badge}",
                 f"• **Stats:** ⚡ `{item.hits}` hits · ⏱️ `{item.cooldown_user}s` user cooldown",
             ]
             if item.channels:
@@ -141,7 +291,7 @@ class AutoresponderPaginationView(discord.ui.View):
             return await interaction.response.send_message("Only the command author can browse pages.", ephemeral=True)
         if self.current_page > 0:
             self.current_page -= 1
-            self._update_buttons()
+            self._update_controls()
             await interaction.response.edit_message(embed=self.make_embed(), view=self)
 
     @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.secondary, custom_id="ar_next")
@@ -150,8 +300,33 @@ class AutoresponderPaginationView(discord.ui.View):
             return await interaction.response.send_message("Only the command author can browse pages.", ephemeral=True)
         if self.current_page < self.total_pages - 1:
             self.current_page += 1
-            self._update_buttons()
+            self._update_controls()
             await interaction.response.edit_message(embed=self.make_embed(), view=self)
+
+    @discord.ui.button(label="➕ Add Responder", style=discord.ButtonStyle.success, custom_id="ar_add_btn")
+    async def add_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            return await interaction.response.send_message("Only the command author can use this button.", ephemeral=True)
+        if not interaction.user.guild_permissions.manage_guild:
+            return await interaction.response.send_message("You need 'Manage Server' permissions to add responders.", ephemeral=True)
+        await interaction.response.send_modal(AutoresponderCreateModal(cog=self.cog, guild=self.guild, author_id=self.author_id))
+
+    @discord.ui.button(label="⚙️ Settings", style=discord.ButtonStyle.secondary, custom_id="ar_settings_btn")
+    async def settings_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            return await interaction.response.send_message("Only the command author can use this button.", ephemeral=True)
+        settings, _ = await self.cog._get_guild_cached(self.guild.id)
+        embed = discord.Embed(
+            title=f"⚙️ Autoresponder Settings · {self.guild.name}",
+            color=PREMIUM_COLOR,
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.add_field(name="Engine State", value="🟢 Enabled" if settings.enabled else "🔴 Disabled", inline=True)
+        embed.add_field(name="Conflict Mode", value=f"`{settings.conflict_mode}`", inline=True)
+        embed.add_field(name="Default Cooldown", value=f"`{settings.default_cooldown}s`", inline=True)
+        embed.add_field(name="Default Ping User", value="🔔 ON" if settings.default_ping else "🔕 OFF", inline=True)
+        embed.set_footer(text="Use /autoresponder settings to configure server options")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 class AutoResponder(commands.Cog):
@@ -308,6 +483,7 @@ class AutoResponder(commands.Cog):
 
         # Build response text
         content: Optional[str] = None
+        selected_template: Optional[str] = None
         if item.replies:
             selected_template = random.choice(item.replies)
             rendered = self.engine.render_variables(selected_template, message)
@@ -317,14 +493,58 @@ class AutoResponder(commands.Cog):
         # Build embeds
         embeds = self.engine.build_embeds(item.embeds, message) if item.embeds else []
 
-        # Mentions security: Disallow mass pings unconditionally
-        allowed_mentions = discord.AllowedMentions(
-            everyone=False,
-            roles=False,
-            users=bool(item.allowed_mentions),
-            replied_user=bool(item.mention_author),
+        # Mentions & Ping behavior
+        author_mention_in_text = (
+            f"<@{message.author.id}>" in (content or "")
+            or f"<@!{message.author.id}>" in (content or "")
+            or (selected_template is not None and "{user.mention}" in selected_template)
         )
 
+        if item.ping_user:
+            if author_mention_in_text:
+                # Text already mentions user: do not duplicate ping via reply header
+                allowed_mentions = discord.AllowedMentions(
+                    everyone=False,
+                    roles=False,
+                    users=[message.author],
+                    replied_user=False,
+                )
+            else:
+                if item.reply_to_message:
+                    # Ping author via reply header
+                    allowed_mentions = discord.AllowedMentions(
+                        everyone=False,
+                        roles=False,
+                        users=[message.author],
+                        replied_user=True,
+                    )
+                else:
+                    # Prepend author mention once if not replying directly
+                    content = f"{message.author.mention} {content}" if content else message.author.mention
+                    allowed_mentions = discord.AllowedMentions(
+                        everyone=False,
+                        roles=False,
+                        users=[message.author],
+                        replied_user=False,
+                    )
+        else:
+            # ping_user is False: Never ping unless explicitly in text template
+            if author_mention_in_text:
+                allowed_mentions = discord.AllowedMentions(
+                    everyone=False,
+                    roles=False,
+                    users=[message.author],
+                    replied_user=False,
+                )
+            else:
+                allowed_mentions = discord.AllowedMentions(
+                    everyone=False,
+                    roles=False,
+                    users=False,
+                    replied_user=False,
+                )
+
+        # 1. Dispatch text reply or embed
         try:
             if content or embeds:
                 if item.reply_to_message:
@@ -339,27 +559,6 @@ class AutoResponder(commands.Cog):
                         embeds=embeds,
                         allowed_mentions=allowed_mentions,
                     )
-
-            # Emoji reactions
-            if item.reactions:
-                for rx in item.reactions[:5]:
-                    try:
-                        await message.add_reaction(rx)
-                    except (discord.HTTPException, discord.Forbidden):
-                        pass
-
-            # Optional delete triggering message
-            if item.delete_trigger:
-                try:
-                    await message.delete()
-                except (discord.HTTPException, discord.Forbidden):
-                    pass
-
-            # Record stats hit asynchronously
-            item.hits += 1
-            item.last_triggered_at = datetime.now(timezone.utc).isoformat()
-            asyncio.create_task(self.storage.record_hit(message.guild.id, item.id))
-
         except discord.Forbidden:
             logger.warning(
                 "Missing permissions to send autoresponse in channel %s (guild %s)",
@@ -368,6 +567,42 @@ class AutoResponder(commands.Cog):
             )
         except discord.HTTPException as exc:
             logger.warning("Discord HTTP error sending autoresponse: %s", exc)
+
+        # 2. Trigger reaction: React to the original message (failure NEVER blocks text response)
+        reaction_to_add = (
+            item.trigger_reaction
+            if item.trigger_reaction and item.trigger_reaction.lower() not in ("none", "off", "disable", "disabled", "false")
+            else (item.reactions[0] if item.reactions else None)
+        )
+        if reaction_to_add:
+            try:
+                await message.add_reaction(reaction_to_add)
+            except (discord.HTTPException, TypeError, ValueError) as rx_err:
+                logger.debug(
+                    "Autoresponder: Could not add reaction '%s' to message %s: %s",
+                    reaction_to_add,
+                    message.id,
+                    rx_err,
+                )
+            except Exception as rx_err:
+                logger.debug(
+                    "Autoresponder: Unexpected error adding reaction '%s' to message %s: %s",
+                    reaction_to_add,
+                    message.id,
+                    rx_err,
+                )
+
+        # 3. Optional delete triggering message
+        if item.delete_trigger:
+            try:
+                await message.delete()
+            except (discord.HTTPException, discord.Forbidden):
+                pass
+
+        # 4. Record stats hit asynchronously
+        item.hits += 1
+        item.last_triggered_at = datetime.now(timezone.utc).isoformat()
+        asyncio.create_task(self.storage.record_hit(message.guild.id, item.id))
 
     # ── Command Suite ─────────────────────────────────────────────────────────
 
@@ -392,6 +627,7 @@ class AutoResponder(commands.Cog):
         limit_str = "Unlimited" if limit == -1 else str(limit)
 
         view = AutoresponderPaginationView(
+            cog=self,
             guild=ctx.guild,
             items=items,
             limit_str=limit_str,
@@ -406,6 +642,8 @@ class AutoResponder(commands.Cog):
         trigger="Trigger keyword/phrase (or multiple comma-separated)",
         reply="Bot response text (supports {user}, {server}, {channel}, etc.)",
         match_mode="Matching mode (contains, exact, startswith, endswith, whole_word, regex)",
+        ping_user="Whether to ping the triggering user (True=ON, False=OFF)",
+        reaction="Optional emoji to react to the trigger message (or 'none')",
         name="Optional friendly name/label for this responder",
         reply_to="Whether to reply directly to the triggering message",
         channel="Restrict responder to a specific channel",
@@ -425,6 +663,8 @@ class AutoResponder(commands.Cog):
         trigger: str,
         reply: str,
         match_mode: Optional[app_commands.Choice[str]] = None,
+        ping_user: bool = False,
+        reaction: Optional[str] = None,
         name: Optional[str] = None,
         reply_to: bool = True,
         channel: Optional[discord.TextChannel] = None,
@@ -453,7 +693,7 @@ class AutoResponder(commands.Cog):
 
         # Regex feature entitlement check
         tier = await self.bot.get_premium_tier(ctx.guild.id) if hasattr(self.bot, "get_premium_tier") else "BASIC"
-        if mode_val == "regex" and tier in ("FREE", "BASIC"):
+        if mode_val == "regex" and str(tier).upper() in ("FREE", "BASIC"):
             return await ctx.send(
                 "❌ **Pro Perk**: Regular expression triggers require a **PRO** or higher tier subscription.",
                 ephemeral=True,
@@ -487,6 +727,13 @@ class AutoResponder(commands.Cog):
                         ephemeral=True,
                     )
 
+        # Resolve reaction
+        rx_val = None
+        if reaction:
+            cleaned_rx = reaction.strip()
+            if cleaned_rx.lower() not in ("none", "off", "disable", "disabled", "false"):
+                rx_val = cleaned_rx
+
         new_item = AutoResponderItem(
             id=str(uuid.uuid4())[:8],
             name=name.strip()[:40] if name else raw_triggers[0][:30],
@@ -494,6 +741,10 @@ class AutoResponder(commands.Cog):
             match_mode=mode_val,
             replies=[clean_reply],
             reply_to_message=reply_to,
+            ping_user=ping_user,
+            mention_author=ping_user,
+            trigger_reaction=rx_val,
+            reactions=[rx_val] if rx_val else [],
             channels=[channel.id] if channel else [],
             roles=[role.id] if role else [],
             created_by=ctx.author.id,
@@ -510,6 +761,8 @@ class AutoResponder(commands.Cog):
         )
         embed.add_field(name="Triggers", value=", ".join(f"`{t}`" for t in raw_triggers), inline=True)
         embed.add_field(name="Match Mode", value=f"`{mode_val}`", inline=True)
+        embed.add_field(name="Ping User", value="🔔 **ON**" if ping_user else "🔕 **OFF**", inline=True)
+        embed.add_field(name="Trigger Reaction", value=f"😃 `{rx_val}`" if rx_val else "*Disabled*", inline=True)
         embed.add_field(name="Reply-To", value="Yes" if reply_to else "No", inline=True)
         if channel:
             embed.add_field(name="Channel Restriction", value=channel.mention, inline=True)
@@ -527,6 +780,8 @@ class AutoResponder(commands.Cog):
         trigger="New trigger phrase (or comma-separated phrases)",
         reply="New response text",
         match_mode="New matching mode",
+        ping_user="Toggle pinging the user on or off (True=ON, False=OFF)",
+        reaction="New trigger reaction emoji (or 'none' to remove)",
         name="New friendly name",
         enabled="Enable or disable this responder",
         priority="Priority number (higher = matched first)",
@@ -547,6 +802,8 @@ class AutoResponder(commands.Cog):
         trigger: Optional[str] = None,
         reply: Optional[str] = None,
         match_mode: Optional[app_commands.Choice[str]] = None,
+        ping_user: Optional[bool] = None,
+        reaction: Optional[str] = None,
         name: Optional[str] = None,
         enabled: Optional[bool] = None,
         priority: Optional[int] = None,
@@ -581,6 +838,22 @@ class AutoResponder(commands.Cog):
                 target.match_mode = mode_val
                 changes.append(f"• **Match Mode:** `{mode_val}`")
 
+        if ping_user is not None:
+            target.ping_user = ping_user
+            target.mention_author = ping_user
+            changes.append(f"• **Ping User:** {'🔔 ON' if ping_user else '🔕 OFF'}")
+
+        if reaction is not None:
+            cleaned_rx = reaction.strip()
+            if cleaned_rx.lower() in ("none", "off", "disable", "disabled", "remove", "clear"):
+                target.trigger_reaction = None
+                target.reactions = []
+                changes.append("• **Trigger Reaction:** *Disabled*")
+            else:
+                target.trigger_reaction = cleaned_rx
+                target.reactions = [cleaned_rx]
+                changes.append(f"• **Trigger Reaction:** `{cleaned_rx}`")
+
         if name is not None:
             target.name = name.strip()[:40]
             changes.append(f"• **Name:** `{target.name}`")
@@ -612,11 +885,11 @@ class AutoResponder(commands.Cog):
         embed.set_footer(text=f"ID: {target.id}")
         await ctx.send(embed=embed)
 
-    @autoresponder.command(name="remove", description="Delete an existing autoresponder", aliases=["delete"])
+    @autoresponder.command(name="delete", description="Remove an autoresponder", aliases=["remove"])
     @commands.has_permissions(manage_guild=True)
     @commands.guild_only()
     @app_commands.describe(identifier="ID, name, or trigger of the responder to delete")
-    async def ar_remove(self, ctx: commands.Context, identifier: str):
+    async def ar_delete(self, ctx: commands.Context, identifier: str):
         if not await self._is_premium(ctx.guild.id):
             return await ctx.send("❌ **Premium Required**.", ephemeral=True)
 
@@ -663,6 +936,11 @@ class AutoResponder(commands.Cog):
         reply_val = target.replies[0] if target.replies else "*No text reply (embeds only)*"
         embed.add_field(name="Text Reply Template", value=f"```{reply_val[:800]}```", inline=False)
 
+        embed.add_field(name="Ping Triggering User", value="🔔 ON" if target.ping_user else "🔕 OFF", inline=True)
+        rx_val = target.trigger_reaction or (target.reactions[0] if target.reactions else None)
+        embed.add_field(name="Trigger Reaction", value=f"😃 `{rx_val}`" if rx_val else "*None (Disabled)*", inline=True)
+        embed.add_field(name="Reply to Message", value="Yes" if target.reply_to_message else "No", inline=True)
+
         embed.add_field(name="Priority", value=f"`{target.priority}`", inline=True)
         embed.add_field(name="User Cooldown", value=f"`{target.cooldown_user}s`", inline=True)
         embed.add_field(name="Hit Count", value=f"`{target.hits}` triggers", inline=True)
@@ -672,7 +950,6 @@ class AutoResponder(commands.Cog):
         rl_text = ", ".join(f"<@&{r}>" for r in target.roles) if target.roles else "*All roles*"
         embed.add_field(name="Allowed Channels", value=ch_text, inline=True)
         embed.add_field(name="Allowed Roles", value=rl_text, inline=True)
-        embed.add_field(name="Reply to Message", value="Yes" if target.reply_to_message else "No", inline=True)
 
         if target.embeds:
             embed.add_field(name="Rich Embeds", value=f"`{len(target.embeds)}` custom embed(s) attached", inline=False)
@@ -767,11 +1044,17 @@ class AutoResponder(commands.Cog):
                 if item.replies
                 else "*[Embed only]*"
             )
+            ping_info = "🔔 ON (User will be pinged)" if item.ping_user else "🔕 OFF (Silent)"
+            rx_val = item.trigger_reaction or (item.reactions[0] if item.reactions else None)
+            rx_info = f"`{rx_val}`" if rx_val else "*None*"
+
             embed.add_field(
                 name=f"🎯 {item.name} (`{item.id}`)",
                 value=(
                     f"• **Matched Trigger:** `{trig}` (`{item.match_mode}`)\n"
                     f"• **Priority:** `{item.priority}`\n"
+                    f"• **Ping User:** {ping_info}\n"
+                    f"• **Trigger Reaction:** {rx_info}\n"
                     f"• **Rendered Output:** \"{rendered[:120]}\""
                 ),
                 inline=False,
@@ -822,6 +1105,7 @@ class AutoResponder(commands.Cog):
         enabled="Toggle autoresponder engine on or off server-wide",
         conflict_mode="How multiple matches are handled (first_match or all_matches)",
         default_cooldown="Default user cooldown in seconds",
+        default_ping="Default ping setting for newly added responders (ON / OFF)",
     )
     @app_commands.choices(conflict_mode=[
         app_commands.Choice(name="First Match (Single highest priority reply)", value="first_match"),
@@ -833,6 +1117,7 @@ class AutoResponder(commands.Cog):
         enabled: Optional[bool] = None,
         conflict_mode: Optional[app_commands.Choice[str]] = None,
         default_cooldown: Optional[float] = None,
+        default_ping: Optional[bool] = None,
     ):
         settings, items = await self._get_guild_cached(ctx.guild.id)
         updated = False
@@ -848,6 +1133,9 @@ class AutoResponder(commands.Cog):
         if default_cooldown is not None and default_cooldown >= 0.0:
             settings.default_cooldown = default_cooldown
             updated = True
+        if default_ping is not None:
+            settings.default_ping = default_ping
+            updated = True
 
         if updated:
             await self._update_guild_cache(ctx.guild.id, settings, items)
@@ -860,6 +1148,7 @@ class AutoResponder(commands.Cog):
         embed.add_field(name="Engine Master Switch", value="🟢 Enabled" if settings.enabled else "🔴 Disabled", inline=True)
         embed.add_field(name="Conflict Mode", value=f"`{settings.conflict_mode}`", inline=True)
         embed.add_field(name="Default Cooldown", value=f"`{settings.default_cooldown}s`", inline=True)
+        embed.add_field(name="Default Ping User", value="🔔 ON" if settings.default_ping else "🔕 OFF", inline=True)
         embed.add_field(
             name="Ignored Channels",
             value=f"`{len(settings.ignored_channels)}` channel(s) ignored",

@@ -296,5 +296,226 @@ class TestAutoresponderStorageAndPersistence(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(loaded_items[0].last_triggered_at)
 
 
+class TestAutoresponderMentionsAndReactions(unittest.IsolatedAsyncioTestCase):
+    """Test ping mention logic, AllowedMentions security, and trigger reaction mechanics."""
+
+    def setUp(self):
+        import discord
+        from cogs.premium.autoreply import AutoResponder
+        self.bot = MagicMock()
+        self.bot.mongo_db = None
+        self.cog = AutoResponder(self.bot)
+
+    def _create_mock_message(self, content="hello", author_id=123456):
+        import discord
+        author = MagicMock(spec=discord.Member)
+        author.id = author_id
+        author.mention = f"<@{author_id}>"
+        author.display_name = "Alice"
+        author.name = "alice"
+        author.bot = False
+        author.roles = []
+
+        guild = MagicMock(spec=discord.Guild)
+        guild.id = 999
+        guild.name = "Test Guild"
+        guild.member_count = 50
+        guild.icon = None
+
+        channel = MagicMock(spec=discord.TextChannel)
+        channel.id = 888
+        channel.name = "general"
+        channel.mention = "<#888>"
+        channel.send = AsyncMock()
+
+        msg = MagicMock(spec=discord.Message)
+        msg.id = 777
+        msg.author = author
+        msg.guild = guild
+        msg.channel = channel
+        msg.content = content
+        msg.webhook_id = None
+        msg.created_at = None
+        msg.reply = AsyncMock()
+        msg.add_reaction = AsyncMock()
+        msg.delete = AsyncMock()
+        return msg
+
+    async def test_ping_on_without_explicit_mention_replies_with_ping(self):
+        msg = self._create_mock_message("hello")
+        item = AutoResponderItem(
+            id="p1",
+            triggers=["hello"],
+            replies=["Welcome!"],
+            reply_to_message=True,
+            ping_user=True,
+        )
+
+        with patch.object(self.cog.storage, "record_hit", new=AsyncMock()):
+            await self.cog._dispatch_response(msg, item)
+
+        msg.reply.assert_called_once()
+        call_kwargs = msg.reply.call_args[1]
+        allowed = call_kwargs["allowed_mentions"]
+        self.assertFalse(allowed.everyone)
+        self.assertFalse(allowed.roles)
+        self.assertTrue(allowed.replied_user)
+        self.assertEqual(allowed.users, [msg.author])
+
+    async def test_ping_off_without_explicit_mention_silent_reply(self):
+        msg = self._create_mock_message("hello")
+        item = AutoResponderItem(
+            id="p2",
+            triggers=["hello"],
+            replies=["Welcome!"],
+            reply_to_message=True,
+            ping_user=False,
+        )
+
+        with patch.object(self.cog.storage, "record_hit", new=AsyncMock()):
+            await self.cog._dispatch_response(msg, item)
+
+        msg.reply.assert_called_once()
+        call_kwargs = msg.reply.call_args[1]
+        allowed = call_kwargs["allowed_mentions"]
+        self.assertFalse(allowed.everyone)
+        self.assertFalse(allowed.roles)
+        self.assertFalse(allowed.replied_user)
+        self.assertFalse(allowed.users)
+
+    async def test_explicit_template_mention_avoids_duplicate_reply_ping(self):
+        msg = self._create_mock_message("hello", author_id=123456)
+        item = AutoResponderItem(
+            id="p3",
+            triggers=["hello"],
+            replies=["Hi {user.mention}!"],
+            reply_to_message=True,
+            ping_user=True,
+        )
+
+        with patch.object(self.cog.storage, "record_hit", new=AsyncMock()):
+            await self.cog._dispatch_response(msg, item)
+
+        msg.reply.assert_called_once()
+        call_kwargs = msg.reply.call_args[1]
+        allowed = call_kwargs["allowed_mentions"]
+        # Explicit mention in content body, so replied_user must be False to avoid double ping
+        self.assertFalse(allowed.replied_user)
+        self.assertEqual(allowed.users, [msg.author])
+        self.assertIn("<@123456>", call_kwargs["content"])
+
+    async def test_ping_on_non_reply_prepends_mention_once(self):
+        msg = self._create_mock_message("hello", author_id=123456)
+        item = AutoResponderItem(
+            id="p4",
+            triggers=["hello"],
+            replies=["Welcome to the server!"],
+            reply_to_message=False,
+            ping_user=True,
+        )
+
+        with patch.object(self.cog.storage, "record_hit", new=AsyncMock()):
+            await self.cog._dispatch_response(msg, item)
+
+        msg.channel.send.assert_called_once()
+        call_kwargs = msg.channel.send.call_args[1]
+        self.assertTrue(call_kwargs["content"].startswith("<@123456>"))
+        allowed = call_kwargs["allowed_mentions"]
+        self.assertEqual(allowed.users, [msg.author])
+
+    async def test_trigger_reaction_success(self):
+        msg = self._create_mock_message("hello")
+        item = AutoResponderItem(
+            id="r1",
+            triggers=["hello"],
+            replies=["Greetings!"],
+            trigger_reaction="👋",
+        )
+
+        with patch.object(self.cog.storage, "record_hit", new=AsyncMock()):
+            await self.cog._dispatch_response(msg, item)
+
+        msg.reply.assert_called_once()
+        msg.add_reaction.assert_called_once_with("👋")
+
+    async def test_trigger_reaction_disabled_sends_no_reaction(self):
+        msg = self._create_mock_message("hello")
+        item = AutoResponderItem(
+            id="r2",
+            triggers=["hello"],
+            replies=["Greetings!"],
+            trigger_reaction=None,
+        )
+
+        with patch.object(self.cog.storage, "record_hit", new=AsyncMock()):
+            await self.cog._dispatch_response(msg, item)
+
+        msg.reply.assert_called_once()
+        msg.add_reaction.assert_not_called()
+
+    async def test_trigger_reaction_error_does_not_block_text_response(self):
+        import discord
+        msg = self._create_mock_message("hello")
+        msg.add_reaction.side_effect = discord.Forbidden(
+            response=MagicMock(status=403, reason="Forbidden"), message="Missing Permissions"
+        )
+        item = AutoResponderItem(
+            id="r3",
+            triggers=["hello"],
+            replies=["Greetings!"],
+            trigger_reaction="🔥",
+        )
+
+        with patch.object(self.cog.storage, "record_hit", new=AsyncMock()):
+            # Must not raise exception
+            await self.cog._dispatch_response(msg, item)
+
+        # Message reply was still sent despite reaction Forbidden error!
+        msg.reply.assert_called_once()
+        self.assertEqual(msg.reply.call_args[1]["content"], "Greetings!")
+
+    def test_item_serialization_and_deserialization(self):
+        # Full serialization round-trip
+        original = AutoResponderItem(
+            id="item123",
+            name="Test",
+            triggers=["ping"],
+            match_mode="exact",
+            replies=["pong"],
+            ping_user=True,
+            trigger_reaction="🏓",
+        )
+        d = original.to_dict()
+        self.assertTrue(d["ping_user"])
+        self.assertEqual(d["trigger_reaction"], "🏓")
+        self.assertEqual(d["reactions"], ["🏓"])
+
+        reloaded = AutoResponderItem.from_dict(d)
+        self.assertTrue(reloaded.ping_user)
+        self.assertEqual(reloaded.trigger_reaction, "🏓")
+        self.assertEqual(reloaded.reactions, ["🏓"])
+
+        # Backward compatibility with legacy mention_author and reactions
+        legacy_data = {
+            "id": "legacy1",
+            "name": "Legacy",
+            "triggers": ["old"],
+            "replies": ["hi"],
+            "mention_author": True,
+            "reactions": ["👋"],
+        }
+        legacy_item = AutoResponderItem.from_dict(legacy_data)
+        self.assertTrue(legacy_item.ping_user)
+        self.assertEqual(legacy_item.trigger_reaction, "👋")
+
+    def test_guild_settings_default_ping_serialization(self):
+        settings = GuildAutoResponderSettings(enabled=True, default_ping=True)
+        d = settings.to_dict()
+        self.assertTrue(d["default_ping"])
+
+        reloaded = GuildAutoResponderSettings.from_dict(d)
+        self.assertTrue(reloaded.default_ping)
+
+
 if __name__ == "__main__":
     unittest.main()
