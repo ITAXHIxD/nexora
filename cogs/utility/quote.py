@@ -600,7 +600,7 @@ class Quote(commands.Cog):
 
     @commands.hybrid_group(
         name="quote",
-        invoke_without_command=True,
+        aliases=["q"],
         fallback="send",
         help="Quote a message by link or by replying to it.",
     )
