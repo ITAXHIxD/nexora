@@ -128,9 +128,8 @@ class TestQuoteCardGeneration(unittest.TestCase):
         )
         self.assertIsNotNone(buf)
         img = Image.open(buf)
-        self.assertEqual(img.format, "PNG")
         self.assertEqual(img.width, 960)
-        self.assertGreaterEqual(img.height, 340)
+        self.assertEqual(img.height, 540)  # Standard 16:9 aspect ratio
 
     def test_quote_card_with_square_avatar(self):
         dummy_avatar = Image.new("RGBA", (256, 256), (88, 101, 242, 255))

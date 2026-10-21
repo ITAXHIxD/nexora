@@ -459,7 +459,10 @@ class Quote(commands.Cog):
             else datetime.now(timezone.utc)
         )
         timestamp_str = msg_dt.strftime("%b %d, %Y")
-        channel_name = getattr(source_channel, "name", "channel")
+        raw_val = getattr(source_channel, "name", None)
+        raw_chan_name = raw_val if isinstance(raw_val, str) else "channel"
+        clean_chan_name = re.sub(r"^[^\w]+|[^\w]+$", "", raw_chan_name).strip()
+        channel_name = clean_chan_name if clean_chan_name else raw_chan_name
 
         quote_file: Optional[discord.File] = None
         embed: Optional[discord.Embed] = None

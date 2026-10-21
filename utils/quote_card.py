@@ -87,6 +87,7 @@ def generate_quote_card(
 ) -> Optional[io.BytesIO]:
     """
     Generate an atmospheric, dark-themed quote card for text-only quotes.
+    Uses standard 16:9 proportions (960x540) matching modern Discord quote cards.
     Returns io.BytesIO containing optimized PNG bytes, or None on failure.
     """
     try:
@@ -95,26 +96,27 @@ def generate_quote_card(
             clean_text = "..."
 
         width = 960
-        left_w = 380
-        right_w = width - left_w - 60  # ~520px content area
+        card_h = 540  # Standard 16:9 aspect ratio
+        left_w = 430  # Prominent portrait avatar area
+        right_w = width - left_w - 60  # ~470px content area
         text_x = left_w + 30
 
         # Adaptive typography sizing based on length
         char_len = len(clean_text)
-        if char_len <= 80:
+        if char_len <= 90:
             quote_size = 32
-            line_spacing = 10
+            line_spacing = 12
         elif char_len <= 220:
-            quote_size = 26
-            line_spacing = 8
+            quote_size = 28
+            line_spacing = 10
         else:
-            quote_size = 22
-            line_spacing = 6
+            quote_size = 23
+            line_spacing = 7
 
         font_quote = _get_font(quote_size, bold=False)
-        font_author = _get_font(21, bold=True)
-        font_handle = _get_font(15, bold=False)
-        font_meta = _get_font(12, bold=False)
+        font_author = _get_font(22, bold=True)
+        font_handle = _get_font(16, bold=False)
+        font_meta = _get_font(11, bold=False)
 
         # Measure text with a dummy canvas
         dummy_img = Image.new("RGBA", (10, 10))
@@ -140,13 +142,14 @@ def generate_quote_card(
         gap = 22
         content_total_h = total_quote_h + gap + author_block_h
 
-        # Dynamic card height with comfortable margins
-        card_h = max(340, min(560, content_total_h + 100))
+        # Dynamic height expansion only if content genuinely exceeds 16:9 canvas
+        if content_total_h + 100 > card_h:
+            card_h = min(680, content_total_h + 100)
 
         # Deep, sleek dark background (charcoal-black #0b0c10)
         card = Image.new("RGBA", (width, card_h), (11, 12, 16, 255))
 
-        # Left section: Atmospheric avatar blend
+        # Left section: Atmospheric avatar blend with full vertical presence
         if avatar_bytes:
             try:
                 with Image.open(io.BytesIO(avatar_bytes)) as av_raw:
@@ -162,9 +165,9 @@ def generate_quote_card(
                     crop_y = max(0, (new_h - card_h) // 2)
                     av_cropped = av_resized.crop((crop_x, crop_y, crop_x + left_w, crop_y + card_h))
 
-                    # Cinematic contrast & subtle tone
+                    # Cinematic contrast & tone
                     enhancer = ImageEnhance.Brightness(av_cropped)
-                    av_cropped = enhancer.enhance(0.90)
+                    av_cropped = enhancer.enhance(0.92)
 
                     # Smooth horizontal alpha gradient mask fading out into pure dark
                     mask = Image.new("L", (left_w, card_h), 255)
@@ -173,7 +176,7 @@ def generate_quote_card(
                     fade_range = left_w - fade_start
                     for x in range(fade_start, left_w):
                         pct = (x - fade_start) / float(fade_range)
-                        alpha = int(255 * (1.0 - (pct ** 1.35)))
+                        alpha = int(255 * (1.0 - (pct ** 1.4)))
                         m_draw.line([(x, 0), (x, card_h)], fill=max(0, min(255, alpha)))
 
                     card.paste(av_cropped, (0, 0), mask)
@@ -182,16 +185,8 @@ def generate_quote_card(
 
         draw = ImageDraw.Draw(card)
 
-        # Discreet 1px card boundary
-        draw.rounded_rectangle(
-            [(0, 0), (width - 1, card_h - 1)],
-            radius=12,
-            outline=(34, 37, 46, 255),
-            width=1,
-        )
-
-        # Position right content vertically centered
-        start_y = max(38, (card_h - content_total_h) // 2 - 8)
+        # Position right content vertically centered in the generous 16:9 canvas
+        start_y = max(38, (card_h - content_total_h) // 2)
 
         # Draw quote text lines
         curr_y = start_y
@@ -205,34 +200,43 @@ def generate_quote_card(
         # Draw author attribution
         curr_y += gap
         author_display = f"- {author_name}" if author_name else "- Anonymous"
-        draw.text((text_x, curr_y), author_display, fill=(225, 228, 235, 255), font=font_author)
+        draw.text((text_x, curr_y), author_display, fill=(228, 230, 238, 255), font=font_author)
 
         curr_y += 24 + 4
         handle_display = f"@{author_handle}" if author_handle else ""
         if handle_display:
-            draw.text((text_x, curr_y), handle_display, fill=(132, 138, 152, 255), font=font_handle)
+            draw.text((text_x, curr_y), handle_display, fill=(135, 140, 155, 255), font=font_handle)
 
-        # Watermark bottom-right
+        # Discreet branding watermark bottom-right (clean, no bottom-left clutter)
+        wm_text = "NEXORA Quotes"
+        wm_bbox = draw.textbbox((0, 0), wm_text, font=font_meta)
+        wm_w = wm_bbox[2] - wm_bbox[0]
+        wm_h = wm_bbox[3] - wm_bbox[1]
         draw.text(
-            (width - 130, card_h - 26),
-            "NEXORA Quotes",
-            fill=(65, 70, 85, 255),
+            (width - wm_w - 16, card_h - wm_h - 14),
+            wm_text,
+            fill=(70, 75, 90, 255),
             font=font_meta,
         )
 
-        # Channel & Date context bottom-left of text column
-        meta_items = []
-        if channel_name:
-            meta_items.append(f"#{channel_name}")
-        if timestamp_str:
-            meta_items.append(timestamp_str)
-        if meta_items:
-            draw.text(
-                (text_x, card_h - 26),
-                " • ".join(meta_items),
-                fill=(65, 70, 85, 255),
-                font=font_meta,
-            )
+        # Apply rounded corner alpha mask to eliminate sharp corners
+        corner_mask = Image.new("L", (width, card_h), 0)
+        c_draw = ImageDraw.Draw(corner_mask)
+        c_draw.rounded_rectangle(
+            [(0, 0), (width - 1, card_h - 1)],
+            radius=12,
+            fill=255,
+        )
+        card.putalpha(corner_mask)
+
+        # Clean 1px perimeter border
+        draw = ImageDraw.Draw(card)
+        draw.rounded_rectangle(
+            [(0, 0), (width - 1, card_h - 1)],
+            radius=12,
+            outline=(36, 40, 52, 255),
+            width=1,
+        )
 
         out = io.BytesIO()
         card.save(out, format="PNG", optimize=True)
