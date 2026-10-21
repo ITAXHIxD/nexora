@@ -2,6 +2,8 @@
 tests/test_quote.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Unit and integration test suite for Nexora Quote System.
+Tests rendering, layout routing, TrueType typography, stateless controls,
+and error fallback resilience.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
@@ -127,10 +129,10 @@ class TestQuoteCardGeneration(unittest.TestCase):
         self.assertIsNotNone(buf)
         img = Image.open(buf)
         self.assertEqual(img.format, "PNG")
-        self.assertGreaterEqual(img.width, 1000)
-        self.assertGreaterEqual(img.height, 400)
+        self.assertEqual(img.width, 960)
+        self.assertGreaterEqual(img.height, 340)
 
-    def test_quote_card_with_avatar(self):
+    def test_quote_card_with_square_avatar(self):
         dummy_avatar = Image.new("RGBA", (256, 256), (88, 101, 242, 255))
         av_io = io.BytesIO()
         dummy_avatar.save(av_io, format="PNG")
@@ -146,17 +148,33 @@ class TestQuoteCardGeneration(unittest.TestCase):
         img = Image.open(buf)
         self.assertEqual(img.format, "PNG")
 
-    def test_quote_card_with_image_attachment(self):
-        dummy_attachment = Image.new("RGBA", (400, 300), (255, 80, 80, 255))
-        att_io = io.BytesIO()
-        dummy_attachment.save(att_io, format="PNG")
+    def test_quote_card_with_portrait_avatar(self):
+        """Test avatar taller than wide (portrait)."""
+        dummy_avatar = Image.new("RGBA", (200, 450), (45, 55, 75, 255))
+        av_io = io.BytesIO()
+        dummy_avatar.save(av_io, format="PNG")
 
         buf = generate_quote_card(
-            author_name="Artist",
-            author_handle="sketcher",
-            text="Look at my new drawing!",
-            image_bytes=att_io.getvalue(),
-            channel_name="art",
+            author_name="PortraitUser",
+            author_handle="portrait",
+            text="Testing portrait aspect ratio.",
+            avatar_bytes=av_io.getvalue(),
+        )
+        self.assertIsNotNone(buf)
+        img = Image.open(buf)
+        self.assertEqual(img.format, "PNG")
+
+    def test_quote_card_with_landscape_avatar(self):
+        """Test avatar wider than tall (landscape)."""
+        dummy_avatar = Image.new("RGBA", (500, 250), (60, 45, 80, 255))
+        av_io = io.BytesIO()
+        dummy_avatar.save(av_io, format="PNG")
+
+        buf = generate_quote_card(
+            author_name="LandscapeUser",
+            author_handle="landscape",
+            text="Testing landscape aspect ratio.",
+            avatar_bytes=av_io.getvalue(),
         )
         self.assertIsNotNone(buf)
         img = Image.open(buf)
@@ -182,7 +200,141 @@ class TestQuoteCardGeneration(unittest.TestCase):
         self.assertIsNotNone(buf)
         img = Image.open(buf)
         self.assertEqual(img.format, "PNG")
-        self.assertGreaterEqual(img.height, 440)
+        self.assertGreaterEqual(img.height, 340)
+
+    def test_quote_card_unicode_and_emojis(self):
+        text = "Hello world! ✨ This contains Unicode chars: 日本語 and emojis 🌟"
+        buf = generate_quote_card(
+            author_name="Global Traveler 🌍",
+            author_handle="traveler",
+            text=text,
+        )
+        self.assertIsNotNone(buf)
+        img = Image.open(buf)
+        self.assertEqual(img.format, "PNG")
+
+
+class TestQuoteExecutionLayouts(unittest.IsolatedAsyncioTestCase):
+    """Test layout routing: Image preservation vs Text-only card vs Fallback."""
+
+    async def asyncSetUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.test_file = os.path.join(self.test_dir, "quotes_test.json")
+        self.patcher = patch("utils.quote_storage.QUOTES_FILE", self.test_file)
+        self.patcher.start()
+
+        self.mock_bot = MagicMock()
+        self.mock_bot.mongo_db = None
+        self.mock_bot.owner_id = 999999999
+        self.mock_bot.tree = MagicMock()
+
+        self.cog = Quote(self.mock_bot)
+
+    async def asyncTearDown(self):
+        self.patcher.stop()
+        if os.path.exists(self.test_dir):
+            shutil.rmtree(self.test_dir)
+
+    async def test_case_a_original_image_preserved_faithfully(self):
+        """When source message has an image, it is used as the embed image without card re-rendering."""
+        guild = MagicMock(id=111, me=MagicMock())
+        dest_channel = MagicMock(id=222, send=AsyncMock())
+        dest_channel.permissions_for.return_value = SimpleNamespace(
+            send_messages=True, embed_links=True
+        )
+        guild.get_channel.return_value = dest_channel
+
+        user = MagicMock(id=333, display_name="QuoterUser", roles=[])
+        user.display_avatar.url = "https://cdn.discordapp.com/avatars/quoter.png"
+
+        source_channel = MagicMock(
+            id=444, name="art-showcase", send=AsyncMock(return_value=MagicMock(id=888))
+        )
+        source_channel.permissions_for.return_value = SimpleNamespace(
+            read_messages=True, read_message_history=True, send_messages=True, embed_links=True
+        )
+
+        mock_att = MagicMock(
+            content_type="image/png",
+            filename="artwork.png",
+            url="https://cdn.discordapp.com/attachments/1/2/artwork.png",
+        )
+        source_msg = MagicMock(
+            id=555,
+            channel=source_channel,
+            author=MagicMock(display_name="Artist", name="artist"),
+            clean_content="My new digital painting!",
+            attachments=[mock_att],
+            created_at=MagicMock(strftime=lambda fmt: "Oct 21, 2026"),
+        )
+
+        respond_mock = AsyncMock()
+
+        await self.cog._execute_quote(
+            user=user,
+            guild=guild,
+            source_message=source_msg,
+            respond_func=respond_mock,
+            is_interaction=True,
+        )
+
+        # Verify sent to channel
+        source_channel.send.assert_called_once()
+        call_kwargs = source_channel.send.call_args[1]
+        sent_embed = call_kwargs["embed"]
+        # Image is original attachment URL
+        self.assertEqual(sent_embed.image.url, "https://cdn.discordapp.com/attachments/1/2/artwork.png")
+        # Description has jump link and quoted text
+        self.assertIn("https://discord.com/channels/111/444/555", sent_embed.description)
+        self.assertIn("My new digital painting!", sent_embed.description)
+        # No file attachment because original image URL was used
+        self.assertNotIn("file", call_kwargs)
+
+    async def test_case_b_text_only_uses_pil_quote_card(self):
+        """When source message has only text, a custom PIL quote card is rendered and attached."""
+        guild = MagicMock(id=111, me=MagicMock())
+
+        user = MagicMock(id=333, display_name="QuoterUser", roles=[])
+        user.display_avatar.url = "https://cdn.discordapp.com/avatars/quoter.png"
+
+        source_channel = MagicMock(id=444, name="general", send=AsyncMock())
+        source_channel.permissions_for.return_value = SimpleNamespace(
+            read_messages=True, read_message_history=True, send_messages=True, embed_links=True
+        )
+
+        source_author = MagicMock(display_name="Speaker", name="speaker")
+        source_author.display_avatar.read = AsyncMock(return_value=None)
+
+        source_msg = MagicMock(
+            id=777,
+            channel=source_channel,
+            author=source_author,
+            clean_content="This is pure wisdom spoken aloud.",
+            attachments=[],
+            created_at=MagicMock(strftime=lambda fmt: "Oct 21, 2026"),
+        )
+
+        respond_mock = AsyncMock()
+
+        await self.cog._execute_quote(
+            user=user,
+            guild=guild,
+            source_message=source_msg,
+            respond_func=respond_mock,
+            is_interaction=True,
+        )
+
+        source_channel.send.assert_called_once()
+        call_kwargs = source_channel.send.call_args[1]
+        sent_embed = call_kwargs["embed"]
+        # File was attached
+        self.assertIn("file", call_kwargs)
+        self.assertEqual(call_kwargs["file"].filename, "quote.png")
+        # Embed points to attachment
+        self.assertEqual(sent_embed.image.url, "attachment://quote.png")
+        # Embed description contains Jump link and NOT duplicate text
+        self.assertIn("https://discord.com/channels/111/444/777", sent_embed.description)
+        self.assertNotIn("This is pure wisdom", sent_embed.description)
 
 
 class TestQuotePermissionsAndRemoval(unittest.IsolatedAsyncioTestCase):
@@ -211,7 +363,6 @@ class TestQuotePermissionsAndRemoval(unittest.IsolatedAsyncioTestCase):
         quote_msg_id = 2000
         quoter_id = 5000
 
-        # Mock interaction by the quote owner
         mock_interaction = MagicMock()
         mock_interaction.guild = MagicMock(id=guild_id)
         mock_interaction.message = MagicMock(id=quote_msg_id, delete=AsyncMock())
@@ -222,7 +373,6 @@ class TestQuotePermissionsAndRemoval(unittest.IsolatedAsyncioTestCase):
         custom_id = f"quote:delete:{quoter_id}"
         await self.cog.handle_quote_removal(mock_interaction, custom_id)
 
-        # Verify message deleted and response is success
         mock_interaction.message.delete.assert_called_once()
         mock_interaction.response.send_message.assert_called_once()
         self.assertIn("Quote successfully removed", mock_interaction.response.send_message.call_args[0][0])
@@ -233,7 +383,6 @@ class TestQuotePermissionsAndRemoval(unittest.IsolatedAsyncioTestCase):
         quoter_id = 5000
         mod_id = 9000
 
-        # Mock interaction by a moderator
         mock_interaction = MagicMock()
         mock_interaction.guild = MagicMock(id=guild_id)
         mock_interaction.message = MagicMock(id=quote_msg_id, delete=AsyncMock())
@@ -244,7 +393,6 @@ class TestQuotePermissionsAndRemoval(unittest.IsolatedAsyncioTestCase):
         custom_id = f"quote:delete:{quoter_id}"
         await self.cog.handle_quote_removal(mock_interaction, custom_id)
 
-        # Verify message deleted
         mock_interaction.message.delete.assert_called_once()
         self.assertIn("Quote successfully removed", mock_interaction.response.send_message.call_args[0][0])
 
@@ -254,7 +402,6 @@ class TestQuotePermissionsAndRemoval(unittest.IsolatedAsyncioTestCase):
         quoter_id = 5000
         random_user_id = 7777
 
-        # Mock interaction by unrelated user
         mock_interaction = MagicMock()
         mock_interaction.guild = MagicMock(id=guild_id)
         mock_interaction.message = MagicMock(id=quote_msg_id, delete=AsyncMock(), embeds=[])
@@ -265,9 +412,7 @@ class TestQuotePermissionsAndRemoval(unittest.IsolatedAsyncioTestCase):
         custom_id = f"quote:delete:{quoter_id}"
         await self.cog.handle_quote_removal(mock_interaction, custom_id)
 
-        # Verify message was NOT deleted
         mock_interaction.message.delete.assert_not_called()
-        # Verify ephemeral denial
         mock_interaction.response.send_message.assert_called_once()
         sent_text = mock_interaction.response.send_message.call_args[0][0]
         self.assertIn("Only the member who created this quote or a server moderator", sent_text)
@@ -278,7 +423,6 @@ class TestQuotePermissionsAndRemoval(unittest.IsolatedAsyncioTestCase):
         mock_guild = MagicMock(id=guild_id)
         mock_user = MagicMock(id=123)
 
-        # Channel where user has no read_messages permission
         mock_source_channel = MagicMock(id=555)
         mock_source_channel.permissions_for.return_value = SimpleNamespace(
             read_messages=False,
@@ -302,7 +446,6 @@ class TestQuotePermissionsAndRemoval(unittest.IsolatedAsyncioTestCase):
             is_interaction=True,
         )
 
-        # Verify request was blocked
         respond_mock.assert_called_once()
         self.assertIn("permission to view or quote", respond_mock.call_args[0][0])
 

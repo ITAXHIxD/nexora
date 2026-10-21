@@ -439,37 +439,60 @@ class Quote(commands.Cog):
         author_handle = getattr(author, "name", str(author))
         content = source_message.clean_content or ""
 
-        # Check for image attachments
-        image_bytes: Optional[bytes] = None
-        has_image = False
-        attachment_links = []
+        # Check for image attachments vs other media/files
+        image_attachment = None
+        other_attachments = []
         for att in source_message.attachments:
-            if att.content_type and att.content_type.startswith("image/"):
-                has_image = True
-                if not image_bytes:
-                    try:
-                        image_bytes = await att.read()
-                    except Exception as e:
-                        logger.debug("Failed to read attachment bytes: %s", e)
+            is_img = (att.content_type and att.content_type.startswith("image/")) or att.filename.lower().endswith(
+                (".png", ".jpg", ".jpeg", ".webp", ".gif")
+            )
+            if is_img and not image_attachment:
+                image_attachment = att
             else:
-                attachment_links.append(f"📎 [{att.filename}]({att.url})")
-
-        # Download author avatar for PIL card
-        avatar_bytes: Optional[bytes] = None
-        try:
-            avatar_bytes = await author.display_avatar.read()
-        except Exception as e:
-            logger.debug("Failed to read author avatar bytes: %s", e)
+                other_attachments.append(att)
 
         # Real Discord message jump link
         jump_url = f"https://discord.com/channels/{guild.id}/{source_channel.id}/{source_message.id}"
-
-        # 8. Render Quote Card / Embed
-        timestamp_str = source_message.created_at.strftime("%b %d, %Y")
+        msg_dt = (
+            source_message.created_at
+            if isinstance(getattr(source_message, "created_at", None), datetime)
+            else datetime.now(timezone.utc)
+        )
+        timestamp_str = msg_dt.strftime("%b %d, %Y")
         channel_name = getattr(source_channel, "name", "channel")
 
         quote_file: Optional[discord.File] = None
-        if settings.render_style == "card":
+        embed: Optional[discord.Embed] = None
+
+        # ── LAYOUT ROUTING ──────────────────────────────────────────────────
+        if image_attachment is not None:
+            # ── CASE A: ORIGINAL MESSAGE CONTAINS AN IMAGE ──────────────────
+            # Preserve the original image faithfully without cropping, distortion, or artificial fading
+            embed_desc_lines = [f"[Jump to original message]({jump_url})"]
+            if content:
+                embed_desc_lines.append(f"\n>>> {content}")
+            if other_attachments:
+                embed_desc_lines.append("\n" + "\n".join(f"📎 [{att.filename}]({att.url})" for att in other_attachments))
+
+            embed = discord.Embed(
+                description="\n".join(embed_desc_lines),
+                color=0x2B2D31,
+                timestamp=msg_dt,
+            )
+            embed.set_image(url=image_attachment.url)
+            embed.set_footer(
+                text=f"Quoted by {user.display_name} • #{channel_name}",
+                icon_url=user.display_avatar.url,
+            )
+
+        elif settings.render_style == "card" and content:
+            # ── CASE B: TEXT-ONLY MESSAGE (ATMOSPHERIC PIL CARD) ───────────
+            avatar_bytes: Optional[bytes] = None
+            try:
+                avatar_bytes = await author.display_avatar.read()
+            except Exception as e:
+                logger.debug("Failed to read author avatar bytes: %s", e)
+
             try:
                 card_buf = await asyncio.to_thread(
                     generate_quote_card,
@@ -477,55 +500,56 @@ class Quote(commands.Cog):
                     author_handle=author_handle,
                     text=content,
                     avatar_bytes=avatar_bytes,
-                    image_bytes=image_bytes,
                     channel_name=channel_name,
                     timestamp_str=timestamp_str,
                 )
                 if card_buf:
                     quote_file = discord.File(card_buf, filename="quote.png")
             except Exception as e:
-                logger.error("PIL card generation failed, falling back to embed: %s", e)
+                logger.error("PIL card generation failed: %s", e)
                 quote_file = None
 
-        # Build Discord Embed
-        # Prominent jump link at the top
-        embed_desc_lines = [f"[Jump to original message]({jump_url})"]
-        if attachment_links:
-            embed_desc_lines.append("\n" + "\n".join(attachment_links))
+            if quote_file:
+                embed_desc_lines = [f"[Jump to original message]({jump_url})"]
+                if other_attachments:
+                    embed_desc_lines.append("\n" + "\n".join(f"📎 [{att.filename}]({att.url})" for att in other_attachments))
 
-        # If card failed to generate or style is embed, format blockquote text
-        if not quote_file:
+                embed = discord.Embed(
+                    description="\n".join(embed_desc_lines),
+                    color=0x2B2D31,
+                    timestamp=msg_dt,
+                )
+                embed.set_image(url="attachment://quote.png")
+                embed.set_footer(
+                    text=f"Quoted by {user.display_name} • #{channel_name}",
+                    icon_url=user.display_avatar.url,
+                )
+
+        # ── CASE C: FALLBACK OR NON-IMAGE ATTACHMENT ONLY ───────────────────
+        if embed is None:
+            embed_desc_lines = [f"[Jump to original message]({jump_url})"]
             if content:
-                # Format with blockquote styling
-                quoted_lines = [f"> {line}" for line in content.split("\n")]
-                embed_desc_lines.append("\n" + "\n".join(quoted_lines))
-            elif has_image:
-                embed_desc_lines.append("\n> _[Shared an image]_")
+                embed_desc_lines.append(f"\n>>> {content}")
+            elif other_attachments:
+                embed_desc_lines.append("\n> _[Shared an attachment]_")
+            if other_attachments:
+                embed_desc_lines.append("\n" + "\n".join(f"📎 [{att.filename}]({att.url})" for att in other_attachments))
 
-        embed = discord.Embed(
-            description="\n".join(embed_desc_lines),
-            color=BRAND_COLOR,
-            timestamp=source_message.created_at,
-        )
-
-        if quote_file:
-            embed.set_image(url="attachment://quote.png")
-        elif has_image and source_message.attachments:
-            embed.set_image(url=source_message.attachments[0].url)
-
-        # Author and Footer
-        if not quote_file:
+            embed = discord.Embed(
+                description="\n".join(embed_desc_lines),
+                color=0x2B2D31,
+                timestamp=msg_dt,
+            )
             embed.set_author(
                 name=f"{author_display_name} (@{author_handle})",
                 icon_url=author.display_avatar.url,
             )
+            embed.set_footer(
+                text=f"Quoted by {user.display_name} • #{channel_name}",
+                icon_url=user.display_avatar.url,
+            )
 
-        embed.set_footer(
-            text=f"Quoted by {user.display_name} • #{channel_name}",
-            icon_url=user.display_avatar.url,
-        )
-
-        # 9. Stateless interactive view with [ 🗑️ Remove my Quote ]
+        # Stateless interactive view with [ 🗑️ Remove my Quote ]
         view = QuoteCardView(quoter_id=user.id)
 
         # Post the quote to destination channel
