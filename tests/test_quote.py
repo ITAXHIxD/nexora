@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from PIL import Image
 
 from cogs.utility.quote import Quote, parse_message_link
-from utils.quote_card import generate_quote_card
+from utils.quote_card import compose_image_quote, generate_quote_card
 from utils.quote_storage import (
     GuildQuoteSettings,
     QuoteStorage,
@@ -214,6 +214,59 @@ class TestQuoteCardGeneration(unittest.TestCase):
         self.assertEqual(img.format, "PNG")
 
 
+    def test_compose_image_quote_square(self):
+        """Square images render at exact 1:1 aspect ratio with rounded corners."""
+        img = Image.new("RGBA", (500, 500), (40, 60, 100, 255))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        res = compose_image_quote(buf.getvalue())
+        self.assertIsNotNone(res)
+        out = Image.open(res)
+        self.assertEqual(out.width, out.height)
+
+    def test_compose_image_quote_landscape(self):
+        """Landscape images fill full width naturally."""
+        img = Image.new("RGBA", (1280, 720), (50, 40, 80, 255))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        res = compose_image_quote(buf.getvalue())
+        self.assertIsNotNone(res)
+        out = Image.open(res)
+        self.assertGreater(out.width, out.height)
+
+    def test_compose_image_quote_portrait(self):
+        """Portrait images are centered on an ambient dark canvas."""
+        img = Image.new("RGBA", (300, 700), (30, 80, 50, 255))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        res = compose_image_quote(buf.getvalue())
+        self.assertIsNotNone(res)
+        out = Image.open(res)
+        self.assertGreater(out.width, 300)
+
+    def test_compose_image_quote_ultrawide(self):
+        """Ultra-wide banners preserve banner proportions without vertical black bars."""
+        img = Image.new("RGBA", (1600, 320), (90, 40, 30, 255))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        res = compose_image_quote(buf.getvalue())
+        self.assertIsNotNone(res)
+        out = Image.open(res)
+        self.assertEqual(round(out.width / out.height, 1), 5.0)
+
+    def test_compose_image_quote_animated_gif_returns_none(self):
+        """Animated GIFs return None so Discord plays the animation natively."""
+        frames = [Image.new("RGB", (100, 100), (255, 0, 0)), Image.new("RGB", (100, 100), (0, 255, 0))]
+        buf = io.BytesIO()
+        frames[0].save(buf, format="GIF", save_all=True, append_images=[frames[1]], duration=100, loop=0)
+        res = compose_image_quote(buf.getvalue())
+        self.assertIsNone(res)
+
+    def test_compose_image_quote_invalid_bytes(self):
+        self.assertIsNone(compose_image_quote(b""))
+        self.assertIsNone(compose_image_quote(b"not an image"))
+
+
 class TestQuoteExecutionLayouts(unittest.IsolatedAsyncioTestCase):
     """Test layout routing: Image preservation vs Text-only card vs Fallback."""
 
@@ -235,8 +288,8 @@ class TestQuoteExecutionLayouts(unittest.IsolatedAsyncioTestCase):
         if os.path.exists(self.test_dir):
             shutil.rmtree(self.test_dir)
 
-    async def test_case_a_original_image_preserved_faithfully(self):
-        """When source message has an image, it is used as the embed image without card re-rendering."""
+    async def test_case_a_card_style_renders_composed_image_file(self):
+        """When render_style == 'card', image attachment is composed with Pillow and attached as quote.png."""
         guild = MagicMock(id=111, me=MagicMock())
         dest_channel = MagicMock(id=222, send=AsyncMock())
         dest_channel.permissions_for.return_value = SimpleNamespace(
@@ -248,21 +301,31 @@ class TestQuoteExecutionLayouts(unittest.IsolatedAsyncioTestCase):
         user.display_avatar.url = "https://cdn.discordapp.com/avatars/quoter.png"
 
         source_channel = MagicMock(
-            id=444, name="art-showcase", send=AsyncMock(return_value=MagicMock(id=888))
+            id=444, send=AsyncMock(return_value=MagicMock(id=888))
         )
+        source_channel.name = "art-showcase"
         source_channel.permissions_for.return_value = SimpleNamespace(
             read_messages=True, read_message_history=True, send_messages=True, embed_links=True
         )
 
+        # Create valid PNG bytes
+        test_img = Image.new("RGBA", (400, 300), (50, 100, 150, 255))
+        img_buf = io.BytesIO()
+        test_img.save(img_buf, format="PNG")
         mock_att = MagicMock(
             content_type="image/png",
             filename="artwork.png",
             url="https://cdn.discordapp.com/attachments/1/2/artwork.png",
+            read=AsyncMock(return_value=img_buf.getvalue()),
         )
+        mock_author = MagicMock(display_name="Artist")
+        mock_author.name = "artist"
+        mock_author.display_avatar.url = "https://cdn.discordapp.com/avatars/artist.png"
+
         source_msg = MagicMock(
             id=555,
             channel=source_channel,
-            author=MagicMock(display_name="Artist", name="artist"),
+            author=mock_author,
             clean_content="My new digital painting!",
             attachments=[mock_att],
             created_at=MagicMock(strftime=lambda fmt: "Oct 21, 2026"),
@@ -278,17 +341,135 @@ class TestQuoteExecutionLayouts(unittest.IsolatedAsyncioTestCase):
             is_interaction=True,
         )
 
-        # Verify sent to channel
         source_channel.send.assert_called_once()
         call_kwargs = source_channel.send.call_args[1]
         sent_embed = call_kwargs["embed"]
-        # Image is original attachment URL
-        self.assertEqual(sent_embed.image.url, "https://cdn.discordapp.com/attachments/1/2/artwork.png")
-        # Description has jump link and quoted text
+        # In card mode, a file was attached and embed points to attachment://quote.png
+        self.assertIn("file", call_kwargs)
+        self.assertEqual(call_kwargs["file"].filename, "quote.png")
+        self.assertEqual(sent_embed.image.url, "attachment://quote.png")
         self.assertIn("https://discord.com/channels/111/444/555", sent_embed.description)
         self.assertIn("My new digital painting!", sent_embed.description)
-        # No file attachment because original image URL was used
+        # Original author attribution
+        self.assertEqual(sent_embed.author.name, "Artist (@artist)")
+        # Quoter attribution footer
+        self.assertIn("Quoted by QuoterUser • #art-showcase", sent_embed.footer.text)
+
+    async def test_case_a_embed_style_uses_raw_attachment_url(self):
+        """When render_style == 'embed', image attachment uses raw URL directly without Pillow file attachment."""
+        guild = MagicMock(id=111, me=MagicMock())
+        dest_channel = MagicMock(id=222, send=AsyncMock())
+        dest_channel.permissions_for.return_value = SimpleNamespace(
+            send_messages=True, embed_links=True
+        )
+        guild.get_channel.return_value = dest_channel
+
+        # Set render_style to embed
+        settings = GuildQuoteSettings(guild_id=111, render_style="embed")
+        await self.cog.storage.save_settings(111, settings)
+
+        user = MagicMock(id=333, display_name="QuoterUser", roles=[])
+        user.display_avatar.url = "https://cdn.discordapp.com/avatars/quoter.png"
+
+        source_channel = MagicMock(
+            id=444, name="general", send=AsyncMock(return_value=MagicMock(id=888))
+        )
+        source_channel.permissions_for.return_value = SimpleNamespace(
+            read_messages=True, read_message_history=True, send_messages=True, embed_links=True
+        )
+
+        mock_att = MagicMock(
+            content_type="image/png",
+            filename="photo.png",
+            url="https://cdn.discordapp.com/attachments/1/2/photo.png",
+        )
+        source_msg = MagicMock(
+            id=556,
+            channel=source_channel,
+            author=MagicMock(display_name="Photographer", name="photo_guy"),
+            clean_content="Nice shot",
+            attachments=[mock_att],
+            created_at=MagicMock(strftime=lambda fmt: "Oct 21, 2026"),
+        )
+
+        respond_mock = AsyncMock()
+
+        await self.cog._execute_quote(
+            user=user,
+            guild=guild,
+            source_message=source_msg,
+            respond_func=respond_mock,
+            is_interaction=True,
+        )
+
+        source_channel.send.assert_called_once()
+        call_kwargs = source_channel.send.call_args[1]
+        sent_embed = call_kwargs["embed"]
+        # Raw URL used, no file attached
         self.assertNotIn("file", call_kwargs)
+        self.assertEqual(sent_embed.image.url, "https://cdn.discordapp.com/attachments/1/2/photo.png")
+
+    async def test_case_a_multiple_attachments_links_preserved(self):
+        """Multiple attachments have extra files listed with clickable links."""
+        guild = MagicMock(id=111, me=MagicMock())
+        dest_channel = MagicMock(id=222, send=AsyncMock())
+        dest_channel.permissions_for.return_value = SimpleNamespace(
+            send_messages=True, embed_links=True
+        )
+        guild.get_channel.return_value = dest_channel
+
+        # Set render_style to embed for simplicity
+        settings = GuildQuoteSettings(guild_id=111, render_style="embed")
+        await self.cog.storage.save_settings(111, settings)
+
+        user = MagicMock(id=333, display_name="QuoterUser", roles=[])
+        user.display_avatar.url = "https://cdn.discordapp.com/avatars/quoter.png"
+
+        source_channel = MagicMock(
+            id=444, name="general", send=AsyncMock(return_value=MagicMock(id=888))
+        )
+        source_channel.permissions_for.return_value = SimpleNamespace(
+            read_messages=True, read_message_history=True, send_messages=True, embed_links=True
+        )
+
+        att1 = MagicMock(
+            content_type="image/png",
+            filename="first.png",
+            url="https://cdn.discordapp.com/attachments/1/first.png",
+        )
+        att2 = MagicMock(
+            content_type="image/png",
+            filename="second.png",
+            url="https://cdn.discordapp.com/attachments/1/second.png",
+        )
+        att3 = MagicMock(
+            content_type="application/pdf",
+            filename="document.pdf",
+            url="https://cdn.discordapp.com/attachments/1/document.pdf",
+        )
+        source_msg = MagicMock(
+            id=557,
+            channel=source_channel,
+            author=MagicMock(display_name="MultiUser", name="multi"),
+            clean_content="Check all these files",
+            attachments=[att1, att2, att3],
+            created_at=MagicMock(strftime=lambda fmt: "Oct 21, 2026"),
+        )
+
+        respond_mock = AsyncMock()
+
+        await self.cog._execute_quote(
+            user=user,
+            guild=guild,
+            source_message=source_msg,
+            respond_func=respond_mock,
+            is_interaction=True,
+        )
+
+        call_kwargs = source_channel.send.call_args[1]
+        sent_embed = call_kwargs["embed"]
+        self.assertIn("🖼️ [second.png](https://cdn.discordapp.com/attachments/1/second.png)", sent_embed.description)
+        self.assertIn("📎 [document.pdf](https://cdn.discordapp.com/attachments/1/document.pdf)", sent_embed.description)
 
     async def test_case_b_text_only_uses_pil_quote_card(self):
         """When source message has only text, a custom PIL quote card is rendered and attached."""

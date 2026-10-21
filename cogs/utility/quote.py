@@ -33,7 +33,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils.quote_card import generate_quote_card
+from utils.quote_card import compose_image_quote, generate_quote_card
 from utils.quote_storage import GuildQuoteSettings, QuoteStorage
 from utils.ui import (
     BRAND_COLOR,
@@ -464,22 +464,56 @@ class Quote(commands.Cog):
         quote_file: Optional[discord.File] = None
         embed: Optional[discord.Embed] = None
 
+        # Extra attachments formatted gracefully
+        extra_att_lines = []
+        for att in other_attachments:
+            is_media = (att.content_type and att.content_type.startswith("image/")) or att.filename.lower().endswith(
+                (".png", ".jpg", ".jpeg", ".webp", ".gif")
+            )
+            icon = "🖼️" if is_media else "📎"
+            extra_att_lines.append(f"{icon} [{att.filename}]({att.url})")
+        extra_att_str = ("\n" + "\n".join(extra_att_lines)) if extra_att_lines else ""
+
         # ── LAYOUT ROUTING ──────────────────────────────────────────────────
         if image_attachment is not None:
             # ── CASE A: ORIGINAL MESSAGE CONTAINS AN IMAGE ──────────────────
-            # Preserve the original image faithfully without cropping, distortion, or artificial fading
+            # In "card" style, intelligently compose image with ambient dark canvas & rounded corners
+            if settings.render_style == "card":
+                img_bytes: Optional[bytes] = None
+                try:
+                    img_bytes = await image_attachment.read()
+                except Exception as e:
+                    logger.warning("Failed to download image attachment for card composition: %s", e)
+
+                if img_bytes:
+                    try:
+                        card_buf = await asyncio.to_thread(compose_image_quote, img_bytes)
+                        if card_buf:
+                            quote_file = discord.File(card_buf, filename="quote.png")
+                    except Exception as e:
+                        logger.error("compose_image_quote failed: %s", e)
+                        quote_file = None
+
             embed_desc_lines = [f"[Jump to original message]({jump_url})"]
             if content:
                 embed_desc_lines.append(f"\n>>> {content}")
-            if other_attachments:
-                embed_desc_lines.append("\n" + "\n".join(f"📎 [{att.filename}]({att.url})" for att in other_attachments))
+            if extra_att_str:
+                embed_desc_lines.append(extra_att_str)
 
             embed = discord.Embed(
                 description="\n".join(embed_desc_lines),
                 color=0x2B2D31,
                 timestamp=msg_dt,
             )
-            embed.set_image(url=image_attachment.url)
+            embed.set_author(
+                name=f"{author_display_name} (@{author_handle})",
+                icon_url=author.display_avatar.url,
+            )
+            if quote_file:
+                embed.set_image(url="attachment://quote.png")
+            else:
+                embed.set_image(url=image_attachment.url)
+
             embed.set_footer(
                 text=f"Quoted by {user.display_name} • #{channel_name}",
                 icon_url=user.display_avatar.url,
@@ -511,14 +545,16 @@ class Quote(commands.Cog):
 
             if quote_file:
                 embed_desc_lines = [f"[Jump to original message]({jump_url})"]
-                if other_attachments:
-                    embed_desc_lines.append("\n" + "\n".join(f"📎 [{att.filename}]({att.url})" for att in other_attachments))
+                if extra_att_str:
+                    embed_desc_lines.append(extra_att_str)
 
                 embed = discord.Embed(
                     description="\n".join(embed_desc_lines),
                     color=0x2B2D31,
                     timestamp=msg_dt,
                 )
+                # Author is already visually baked into the card (name, handle, avatar),
+                # so omit embed.set_author to avoid duplicate redundant headers.
                 embed.set_image(url="attachment://quote.png")
                 embed.set_footer(
                     text=f"Quoted by {user.display_name} • #{channel_name}",
@@ -532,8 +568,8 @@ class Quote(commands.Cog):
                 embed_desc_lines.append(f"\n>>> {content}")
             elif other_attachments:
                 embed_desc_lines.append("\n> _[Shared an attachment]_")
-            if other_attachments:
-                embed_desc_lines.append("\n" + "\n".join(f"📎 [{att.filename}]({att.url})" for att in other_attachments))
+            if extra_att_str:
+                embed_desc_lines.append(extra_att_str)
 
             embed = discord.Embed(
                 description="\n".join(embed_desc_lines),

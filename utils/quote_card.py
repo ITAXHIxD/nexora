@@ -6,8 +6,9 @@ Inspired by the "Make it a Quote" dark atmospheric aesthetic:
   • High-quality TrueType font selection (Segoe UI / Arial / DejaVu Sans).
   • Pixel-measured text wrapping and dynamic vertical centering.
   • Atmospheric horizontal avatar fade into deep dark charcoal background.
-  • Clean typography, crisp attribution, and discreet branding watermark.
-  • Zero unnecessary borders, no blurry stretching, and no redundant elements.
+  • compose_image_quote(): Intelligent composition for image-based quotes
+    preserving full aspect ratio, clarity, and handling portrait/landscape/square.
+  • Zero distortion, no blurry stretching, and no redundant borders.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
@@ -16,7 +17,7 @@ import logging
 import os
 from typing import List, Optional
 
-from PIL import Image, ImageDraw, ImageEnhance, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 logger = logging.getLogger(__name__)
 
@@ -240,4 +241,125 @@ def generate_quote_card(
 
     except Exception as exc:
         logger.error("Failed to generate quote card image: %s", exc, exc_info=True)
+        return None
+
+
+def compose_image_quote(
+    image_bytes: bytes,
+    target_max_w: int = 960,
+    target_max_h: int = 720,
+) -> Optional[io.BytesIO]:
+    """
+    Intelligently compose an image-based quote into a polished Discord card.
+    Preserves 100% of the image's original aspect ratio, clarity, and content.
+    Returns io.BytesIO PNG bytes, or None for animated GIFs / unsupported formats.
+    """
+    if not image_bytes:
+        return None
+    try:
+        Image.MAX_IMAGE_PIXELS = 50_000_000
+        with Image.open(io.BytesIO(image_bytes)) as src_raw:
+            # Check animated images: return None so Discord plays the animated GIF natively
+            if getattr(src_raw, "is_animated", False) or getattr(src_raw, "n_frames", 1) > 1:
+                return None
+
+            src_rgb = src_raw.convert("RGBA")
+            orig_w, orig_h = src_rgb.size
+            if orig_w <= 0 or orig_h <= 0 or orig_w > 8000 or orig_h > 8000:
+                return None
+
+            aspect = orig_w / float(orig_h)
+
+            # Fit scaling: preserve aspect ratio, never distort or stretch
+            scale = min(target_max_w / float(orig_w), target_max_h / float(orig_h))
+            # For small images, avoid blurry over-upscaling
+            if orig_w < target_max_w and orig_h < target_max_h:
+                scale = min(1.35, scale)
+
+            new_w = max(1, int(orig_w * scale))
+            new_h = max(1, int(orig_h * scale))
+            resized = src_rgb.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+            # Composition decision based on aspect ratio:
+            # For landscape, square, and standard portrait (aspect >= 0.60):
+            # The original image is prominent and fills the embed width directly.
+            # Avoid redundant padding, nested borders, and awkward margins.
+            if aspect >= 0.60:
+                canvas_w = new_w
+                canvas_h = new_h
+                canvas = resized
+            else:
+                # Very narrow / extreme tall image (aspect < 0.60):
+                # Provide a balanced canvas width with an atmospheric ambient blur
+                # background so it doesn't look like an awkwardly spindly strip in Discord.
+                canvas_w = max(new_w, min(720, int(new_h * 0.95)))
+                canvas_h = new_h
+                canvas = Image.new("RGBA", (canvas_w, canvas_h), (11, 12, 16, 255))
+
+                # Ambient blurred background
+                bg_scale = max(canvas_w / float(orig_w), canvas_h / float(orig_h))
+                bg_w = max(1, int(orig_w * bg_scale))
+                bg_h = max(1, int(orig_h * bg_scale))
+                bg_resized = src_rgb.resize((bg_w, bg_h), Image.Resampling.BILINEAR)
+                crop_x = max(0, (bg_w - canvas_w) // 2)
+                crop_y = max(0, (bg_h - canvas_h) // 2)
+                bg_cropped = bg_resized.crop((crop_x, crop_y, crop_x + canvas_w, crop_y + canvas_h))
+                bg_blur = bg_cropped.filter(ImageFilter.GaussianBlur(28))
+
+                # Dark dimming layer over background blur
+                dim = Image.new("RGBA", (canvas_w, canvas_h), (8, 9, 12, 185))
+                bg_blur.paste(dim, (0, 0), dim)
+                canvas.paste(bg_blur, (0, 0))
+
+                # Center foreground image cleanly
+                fg_x = (canvas_w - new_w) // 2
+                fg_y = (canvas_h - new_h) // 2
+                canvas.paste(resized, (fg_x, fg_y), resized if resized.mode == "RGBA" else None)
+
+            # Apply rounded corner mask to eliminate sharp corners
+            if canvas.mode != "RGBA":
+                canvas = canvas.convert("RGBA")
+            corner_mask = Image.new("L", (canvas.width, canvas.height), 0)
+            c_draw = ImageDraw.Draw(corner_mask)
+            c_draw.rounded_rectangle(
+                [(0, 0), (canvas.width - 1, canvas.height - 1)],
+                radius=10,
+                fill=255,
+            )
+            canvas.putalpha(corner_mask)
+
+            # Draw clean rounded border along the perimeter
+            draw = ImageDraw.Draw(canvas)
+            draw.rounded_rectangle(
+                [(0, 0), (canvas.width - 1, canvas.height - 1)],
+                radius=10,
+                outline=(42, 45, 56, 255),
+                width=1,
+            )
+
+            # Subtle tasteful NEXORA branding watermark in bottom-right corner
+            font_wm = _get_font(11, bold=False)
+            wm_text = "NEXORA Quotes"
+            wm_bbox = draw.textbbox((0, 0), wm_text, font=font_wm)
+            wm_w = wm_bbox[2] - wm_bbox[0]
+            wm_h = wm_bbox[3] - wm_bbox[1]
+            wm_x = canvas.width - wm_w - 14
+            wm_y = canvas.height - wm_h - 10
+
+            # Soft shadow + subtle silver text for contrast on any background
+            draw.text((wm_x + 1, wm_y + 1), wm_text, fill=(0, 0, 0, 150), font=font_wm)
+            draw.text((wm_x, wm_y), wm_text, fill=(215, 220, 235, 190), font=font_wm)
+
+            out = io.BytesIO()
+            # If canvas exceeds Discord 8MB limit, compress safely to JPEG
+            canvas.save(out, format="PNG", optimize=True)
+            if out.getbuffer().nbytes > 8 * 1024 * 1024:
+                out = io.BytesIO()
+                canvas.convert("RGB").save(out, format="JPEG", quality=90, optimize=True)
+
+            out.seek(0)
+            return out
+
+    except Exception as exc:
+        logger.error("Failed to compose image quote card: %s", exc, exc_info=True)
         return None
