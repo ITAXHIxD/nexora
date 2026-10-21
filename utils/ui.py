@@ -286,21 +286,31 @@ async def send_view(
             if target.response.is_done():
                 msg = await target.followup.send(view=view, ephemeral=ephemeral)
             else:
-                await target.response.send_message(view=view, ephemeral=ephemeral)
                 try:
-                    msg = await target.original_response()
-                except Exception:
-                    msg = None
+                    await target.response.send_message(view=view, ephemeral=ephemeral)
+                    try:
+                        msg = await target.original_response()
+                    except Exception:
+                        msg = None
+                except (discord.InteractionResponded, discord.HTTPException) as exc:
+                    if isinstance(exc, discord.HTTPException) and getattr(exc, "code", None) not in (40060, 50027):
+                        raise
+                    msg = await target.followup.send(view=view, ephemeral=ephemeral)
         elif isinstance(target, commands.Context):
             if target.interaction:
                 if target.interaction.response.is_done():
                     msg = await target.interaction.followup.send(view=view, ephemeral=ephemeral)
                 else:
-                    await target.interaction.response.send_message(view=view, ephemeral=ephemeral)
                     try:
-                        msg = await target.interaction.original_response()
-                    except Exception:
-                        msg = None
+                        await target.interaction.response.send_message(view=view, ephemeral=ephemeral)
+                        try:
+                            msg = await target.interaction.original_response()
+                        except Exception:
+                            msg = None
+                    except (discord.InteractionResponded, discord.HTTPException) as exc:
+                        if isinstance(exc, discord.HTTPException) and getattr(exc, "code", None) not in (40060, 50027):
+                            raise
+                        msg = await target.interaction.followup.send(view=view, ephemeral=ephemeral)
             else:
                 msg = await target.send(view=view)
         else:

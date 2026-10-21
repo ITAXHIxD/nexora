@@ -510,9 +510,9 @@ class ServerControlHubView(discord.ui.View):
         status_text = "🟢 **Active Server Subscription**" if is_active else "⚪ **Free Tier**"
         embed.description = f"### Plan: `{cfg['display_name']}`\n> Status: {status_text} · Guild ID: `{g.id}`"
 
-        vanity_roles = self.doc.get("vanity_roles", {})
-        custom_replies = self.doc.get("custom_replies", [])
-        booster_roles = self.doc.get("booster_roles", {})
+        vanity_roles = self.doc.get("vanity_roles") or {}
+        custom_replies = self.doc.get("custom_replies") or []
+        booster_roles = self.doc.get("booster_roles") or {}
 
         v_limit = cfg["features"].get("vanity_roles", 0)
         r_limit = cfg["features"].get("custom_responses", 0)
@@ -628,6 +628,10 @@ class ServerControlHubView(discord.ui.View):
 
     @discord.ui.button(label="Dismiss", emoji="🗑️", style=discord.ButtonStyle.danger, row=1)
     async def btn_dismiss(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await interaction.response.defer()
+        except discord.InteractionResponded:
+            pass
         await interaction.message.delete()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -1189,9 +1193,16 @@ class Premium(commands.Cog):
         app_commands.Choice(name="Personal User VIP", value="user"),
     ])
     @app_commands.describe(view="Choose a dashboard; Server Premium is the default")
-    async def premium_slash(self, interaction: discord.Interaction, view: str = "server"):
+    async def premium_slash(
+        self,
+        interaction: discord.Interaction,
+        view: Optional[app_commands.Choice[str]] = None,
+    ):
         """Standalone /premium command; prefix commands remain n!premium server/user."""
-        if view == "user":
+        view_val = view.value if isinstance(view, app_commands.Choice) else str(view or "server").lower()
+
+        if view_val == "user":
+            await interaction.response.defer(ephemeral=True)
             doc = await self.get_user_doc(interaction.user.id)
             tier = str(doc.get("tier", "FREE") or "FREE").upper()
             if _is_expired(doc):
@@ -1222,7 +1233,7 @@ class Premium(commands.Cog):
                 inline=False,
             )
             embed.set_footer(text="Nexora VIP Network")
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await interaction.followup.send(embed=embed, ephemeral=True)
 
         if interaction.guild is None:
             return await interaction.response.send_message(
@@ -1230,9 +1241,11 @@ class Premium(commands.Cog):
                 ephemeral=True,
             )
 
+        # Defer immediately to give async MongoDB / fallback lookup plenty of time
+        await interaction.response.defer(ephemeral=False)
         doc = await self.get_server_doc(interaction.guild.id)
         panel = ServerControlHubView(self, interaction.guild, doc, interaction.user)
-        await interaction.response.send_message(embed=panel.get_overview_embed(), view=panel)
+        await interaction.followup.send(embed=panel.get_overview_embed(), view=panel)
 
     @commands.hybrid_command(name="premium_price", description="View Server Premium and User VIP plans and pricing calculator", aliases=["plans", "upgrade"])
     async def premium_price(self, ctx: commands.Context):

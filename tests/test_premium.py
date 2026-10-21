@@ -193,6 +193,36 @@ class TestPremiumCogAsync(unittest.IsolatedAsyncioTestCase):
         self.assertIn("badge", vip_subcommands)
         self.assertIn("pass", vip_subcommands)
 
+    async def test_premium_slash_execution(self):
+        interaction = MagicMock(spec=discord.Interaction)
+        interaction.guild = MagicMock(spec=discord.Guild)
+        interaction.guild.id = 123456
+        interaction.guild.name = "Test Guild"
+        interaction.guild.icon = None
+        interaction.guild.banner = None
+        interaction.guild.me = MagicMock()
+        interaction.guild.me.top_role = MagicMock()
+        interaction.guild.me.top_role.mention = "@Nexora"
+        interaction.guild.me.top_role.position = 10
+        interaction.guild.me.guild_permissions = MagicMock()
+        interaction.guild.me.guild_permissions.manage_roles = True
+        interaction.guild.me.guild_permissions.manage_channels = True
+        interaction.user = MagicMock(spec=discord.Member)
+        interaction.user.id = 999999
+        interaction.user.display_name = "Owner"
+        interaction.user.display_avatar = MagicMock()
+        interaction.user.display_avatar.url = "https://example.com/avatar.png"
+        interaction.response = MagicMock()
+        interaction.response.defer = AsyncMock()
+        interaction.followup = MagicMock()
+        interaction.followup.send = AsyncMock()
+
+        # Run /premium (default server dashboard)
+        await self.cog.premium_slash.callback(self.cog, interaction)
+        interaction.response.defer.assert_called_once_with(ephemeral=False)
+        interaction.followup.send.assert_called_once()
+
+
 
 if __name__ == "__main__":
     unittest.main()
