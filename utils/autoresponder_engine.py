@@ -72,6 +72,136 @@ def sanitize_regex(pattern: str) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
+DISCORD_EMOJI_SHORTCODES: Dict[str, str] = {
+    # Hand gestures & body
+    ":thumbsup:": "👍", ":+1:": "👍", ":thumbsdown:": "👎", ":-1:": "👎",
+    ":wave:": "👋", ":clap:": "👏", ":raised_hands:": "🙌", ":pray:": "🙏",
+    ":ok_hand:": "👌", ":pinching_hand:": "🤏", ":v:": "✌️", ":peace:": "✌️",
+    ":crossed_fingers:": "🤞", ":love_you_gesture:": "🤟", ":metal:": "🤘",
+    ":call_me:": "🤙", ":point_left:": "👈", ":point_right:": "👉",
+    ":point_up_2:": "👆", ":point_down:": "👇", ":point_up:": "☝️",
+    ":punch:": "👊", ":facepunch:": "👊", ":fist:": "✊", ":left_facing_fist:": "🤛",
+    ":right_facing_fist:": "🤜", ":handshake:": "🤝", ":muscle:": "💪",
+    ":eyes:": "👀", ":eye:": "👁️", ":ear:": "👂", ":nose:": "👃",
+    ":brain:": "🧠", ":bone:": "🦴", ":leg:": "🦵", ":foot:": "🦶",
+    # Smileys & Emotions
+    ":smile:": "😄", ":grinning:": "😀", ":smiley:": "😃", ":grin:": "😁",
+    ":joy:": "😂", ":rofl:": "🤣", ":sweat_smile:": "😅", ":laughing:": "😆",
+    ":wink:": "😉", ":blush:": "😊", ":innocent:": "😇", ":slight_smile:": "🙂",
+    ":upside_down:": "🙃", ":heart_eyes:": "😍", ":star_struck:": "🤩",
+    ":kissing_heart:": "😘", ":kissing:": "😗", ":relaxed:": "☺️",
+    ":yum:": "😋", ":stuck_out_tongue:": "😛", ":stuck_out_tongue_winking_eye:": "😜",
+    ":stuck_out_tongue_closed_eyes:": "😝", ":money_mouth:": "🤑",
+    ":hugging:": "🤗", ":hand_over_mouth:": "🤭", ":shushing_face:": "🤫",
+    ":thinking:": "🤔", ":zipper_mouth:": "🤐", ":raised_eyebrow:": "🤨",
+    ":neutral_face:": "😐", ":expressionless:": "😑", ":no_mouth:": "😶",
+    ":smirk:": "😏", ":unamused:": "😒", ":rolling_eyes:": "🙄",
+    ":grimacing:": "😬", ":lying_face:": "🤥", ":relieved:": "😌",
+    ":pensive:": "😔", ":sleepy:": "😪", ":drooling_face:": "🤤",
+    ":sleeping:": "😴", ":mask:": "😷", ":face_with_thermometer:": "🤒",
+    ":nerd:": "🤓", ":sunglasses:": "😎", ":confused:": "😕",
+    ":worried:": "😟", ":slight_frown:": "🙁", ":frowning2:": "☹️",
+    ":open_mouth:": "😮", ":hushed:": "😯", ":astonished:": "😲",
+    ":flushed:": "😳", ":pleading_face:": "🥺", ":frowning:": "😦",
+    ":anguished:": "😧", ":fearful:": "😨", ":cold_sweat:": "😰",
+    ":disappointed_relieved:": "😥", ":cry:": "😢", ":sob:": "😭",
+    ":scream:": "😱", ":confounded:": "😖", ":persevere:": "😣",
+    ":disappointed:": "😞", ":sweat:": "😓", ":weary:": "😩",
+    ":tired_face:": "😫", ":yawning_face:": "🥱", ":triumph:": "😤",
+    ":rage:": "😡", ":angry:": "😠", ":cursing_face:": "🤬",
+    ":smiling_imp:": "😈", ":imp:": "👿", ":skull:": "💀",
+    ":skull_and_crossbones:": "☠️", ":poop:": "💩", ":clown:": "🤡",
+    ":ghost:": "👻", ":alien:": "👽", ":robot:": "🤖",
+    # Hearts & Symbols
+    ":heart:": "❤️", ":red_heart:": "❤️", ":orange_heart:": "🧡",
+    ":yellow_heart:": "💛", ":green_heart:": "💚", ":blue_heart:": "💙",
+    ":purple_heart:": "💜", ":black_heart:": "🖤", ":white_heart:": "🤍",
+    ":brown_heart:": "🤎", ":broken_heart:": "💔", ":heart_exclamation:": "❣️",
+    ":two_hearts:": "💕", ":revolving_hearts:": "💞", ":heartbeat:": "💓",
+    ":heartpulse:": "💗", ":sparkling_heart:": "💖", ":cupid:": "💘",
+    ":gift_heart:": "💝", ":sparkles:": "✨", ":star:": "⭐",
+    ":star2:": "🌟", ":dizzy:": "💫", ":boom:": "💥", ":collision:": "💥",
+    ":anger:": "💢", ":sweat_drops:": "💦", ":dash:": "💨",
+    ":hole:": "🕳️", ":bomb:": "💣", ":speech_balloon:": "💬",
+    ":fire:": "🔥", ":zap:": "⚡", ":tada:": "🎉", ":confetti_ball:": "🎊",
+    ":100:": "💯", ":trophy:": "🏆", ":medal:": "🥇", ":crown:": "👑",
+    ":check:": "✅", ":white_check_mark:": "✅", ":ballot_box_with_check:": "☑️",
+    ":x:": "❌", ":cross_mark:": "❌", ":negative_squared_cross_mark:": "❎",
+    ":question:": "❓", ":grey_question:": "❔", ":exclamation:": "❗",
+    ":grey_exclamation:": "❕", ":warning:": "⚠️", ":no_entry:": "⛔",
+    ":no_entry_sign:": "🚫", ":prohibited:": "🚫", ":bell:": "🔔",
+    ":no_bell:": "🔕", ":bulb:": "💡", ":gear:": "⚙️", ":pin:": "📌",
+}
+
+
+def extract_react_tags(template: str) -> Tuple[str, List[str]]:
+    """
+    Extract any {react: :emoji:} or {react: emoji} tags from a response template.
+    Returns (cleaned_text_without_react_tags, list_of_raw_emojis).
+    """
+    if not template:
+        return "", []
+    raw_tags = re.findall(r"\{react:\s*([^}]+)\}", template, re.IGNORECASE)
+    cleaned = re.sub(r"\{react:\s*[^}]+\}", "", template)
+    cleaned = re.sub(r"  +", " ", cleaned).strip()
+    emojis = [tag.strip() for tag in raw_tags if tag.strip()]
+    return cleaned, emojis
+
+
+def resolve_emoji(
+    raw: str,
+    guild: Optional[discord.Guild] = None,
+    bot: Optional[Any] = None,
+) -> Any:
+    """
+    Resolve an emoji input (shortcode like ':wave:', custom format '<:name:id>',
+    guild custom emoji name, or literal unicode character) into a valid Discord reaction argument.
+    """
+    if not raw:
+        return ""
+    raw = str(raw).strip()
+
+    # 1. Direct shortcode lookup
+    if raw in DISCORD_EMOJI_SHORTCODES:
+        return DISCORD_EMOJI_SHORTCODES[raw]
+
+    # 2. Check if wrapped in colons or stripped of colons
+    colon_form = f":{raw.strip(':')}:"
+    if colon_form in DISCORD_EMOJI_SHORTCODES:
+        return DISCORD_EMOJI_SHORTCODES[colon_form]
+
+    clean_name = raw.strip(":")
+
+    # 3. Custom server emoji by name in guild
+    if guild and hasattr(guild, "emojis"):
+        for ge in guild.emojis:
+            if ge.name.casefold() == clean_name.casefold():
+                return ge
+
+    # 4. Custom emoji by name across bot cache
+    if bot and hasattr(bot, "emojis"):
+        for be in bot.emojis:
+            if be.name.casefold() == clean_name.casefold():
+                return be
+
+    # 5. Formatted custom emoji <:name:id> or <a:name:id>
+    custom_match = re.match(r"^<a?:([a-zA-Z0-9_]+):(\d+)>$", raw)
+    if custom_match:
+        emoji_id = int(custom_match.group(2))
+        if guild and hasattr(guild, "emojis"):
+            ge = discord.utils.get(guild.emojis, id=emoji_id)
+            if ge:
+                return ge
+        if bot and hasattr(bot, "emojis"):
+            be = discord.utils.get(bot.emojis, id=emoji_id)
+            if be:
+                return be
+        return raw
+
+    # 6. Fallback: Return raw
+    return raw
+
+
 @dataclass
 class AutoResponderItem:
     id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
@@ -582,6 +712,10 @@ class AutoResponderEngine:
                 return match.group(0)
 
         text = re.sub(r"\{random:(\d+)-(\d+)\}", _replace_random, text)
+
+        # Strip any inline {react: ...} action tags so they don't render in output text
+        text = re.sub(r"\{react:\s*[^}]+\}", "", text)
+        text = re.sub(r"  +", " ", text).strip()
 
         return text
 

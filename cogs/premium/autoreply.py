@@ -41,6 +41,8 @@ from utils.autoresponder_engine import (
     GuildAutoResponderSettings,
     VALID_CONFLICT_MODES,
     VALID_MATCH_MODES,
+    extract_react_tags,
+    resolve_emoji,
     sanitize_regex,
 )
 from utils.autoresponder_storage import AutoResponderStorage
@@ -481,12 +483,20 @@ class AutoResponder(commands.Cog):
         if item.delay_seconds > 0:
             await asyncio.sleep(min(item.delay_seconds, 10.0))
 
-        # Build response text
+        # Build response text & extract inline {react: :emoji:} tags
         content: Optional[str] = None
         selected_template: Optional[str] = None
+        inline_reactions: List[Any] = []
+
         if item.replies:
             selected_template = random.choice(item.replies)
-            rendered = self.engine.render_variables(selected_template, message)
+            cleaned_template, raw_react_tags = extract_react_tags(selected_template)
+            for tag in raw_react_tags:
+                resolved = resolve_emoji(tag, message.guild, getattr(self, "bot", None))
+                if resolved and resolved not in inline_reactions:
+                    inline_reactions.append(resolved)
+
+            rendered = self.engine.render_variables(cleaned_template, message)
             if rendered.strip():
                 content = rendered[:2000]
 
@@ -568,26 +578,36 @@ class AutoResponder(commands.Cog):
         except discord.HTTPException as exc:
             logger.warning("Discord HTTP error sending autoresponse: %s", exc)
 
-        # 2. Trigger reaction: React to the original message (failure NEVER blocks text response)
-        reaction_to_add = (
+        # 2. Trigger reactions: Combine inline {react: ...} and configured trigger_reaction
+        all_reactions: List[Any] = []
+        for r in inline_reactions:
+            if r not in all_reactions:
+                all_reactions.append(r)
+
+        trig_rx = (
             item.trigger_reaction
             if item.trigger_reaction and item.trigger_reaction.lower() not in ("none", "off", "disable", "disabled", "false")
             else (item.reactions[0] if item.reactions else None)
         )
-        if reaction_to_add:
+        if trig_rx:
+            resolved_trig = resolve_emoji(trig_rx, message.guild, getattr(self, "bot", None))
+            if resolved_trig and resolved_trig not in all_reactions:
+                all_reactions.append(resolved_trig)
+
+        for rx in all_reactions[:10]:
             try:
-                await message.add_reaction(reaction_to_add)
+                await message.add_reaction(rx)
             except (discord.HTTPException, TypeError, ValueError) as rx_err:
                 logger.debug(
                     "Autoresponder: Could not add reaction '%s' to message %s: %s",
-                    reaction_to_add,
+                    rx,
                     message.id,
                     rx_err,
                 )
             except Exception as rx_err:
                 logger.debug(
                     "Autoresponder: Unexpected error adding reaction '%s' to message %s: %s",
-                    reaction_to_add,
+                    rx,
                     message.id,
                     rx_err,
                 )
@@ -1039,24 +1059,30 @@ class AutoResponder(commands.Cog):
         )
 
         for item, trig in matches:
+            cleaned_rep, inline_tags = extract_react_tags(item.replies[0]) if item.replies else ("", [])
             rendered = (
-                self.engine.render_variables(item.replies[0], ctx.message)
-                if item.replies
-                else "*[Embed only]*"
+                self.engine.render_variables(cleaned_rep, ctx.message)
+                if cleaned_rep
+                else "*[Reactions only / Embed only]*"
             )
             ping_info = "🔔 ON (User will be pinged)" if item.ping_user else "🔕 OFF (Silent)"
             rx_val = item.trigger_reaction or (item.reactions[0] if item.reactions else None)
             rx_info = f"`{rx_val}`" if rx_val else "*None*"
+            inline_info = ", ".join(f"`{t}`" for t in inline_tags) if inline_tags else None
+
+            details = [
+                f"• **Matched Trigger:** `{trig}` (`{item.match_mode}`)",
+                f"• **Priority:** `{item.priority}`",
+                f"• **Ping User:** {ping_info}",
+                f"• **Trigger Reaction:** {rx_info}",
+            ]
+            if inline_info:
+                details.append(f"• **Inline Reaction(s):** {inline_info}")
+            details.append(f"• **Rendered Output:** \"{rendered[:120]}\"")
 
             embed.add_field(
                 name=f"🎯 {item.name} (`{item.id}`)",
-                value=(
-                    f"• **Matched Trigger:** `{trig}` (`{item.match_mode}`)\n"
-                    f"• **Priority:** `{item.priority}`\n"
-                    f"• **Ping User:** {ping_info}\n"
-                    f"• **Trigger Reaction:** {rx_info}\n"
-                    f"• **Rendered Output:** \"{rendered[:120]}\""
-                ),
+                value="\n".join(details),
                 inline=False,
             )
 
@@ -1279,7 +1305,8 @@ class AutoResponder(commands.Cog):
                 "• `{channel}` / `{channel.id}` — Channel mention / ID\n"
                 "• `{members}` — Current server member count\n"
                 "• `{created_at}` — Relative time of triggering message\n"
-                "• `{random:1-100}` — Random number between min and max"
+                "• `{random:1-100}` — Random number between min and max\n"
+                "• `{react: :emoji:}` — React to message with emoji (e.g. `{react: :wave:}`)"
             ),
             inline=False,
         )

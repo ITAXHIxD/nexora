@@ -516,6 +516,78 @@ class TestAutoresponderMentionsAndReactions(unittest.IsolatedAsyncioTestCase):
         reloaded = GuildAutoResponderSettings.from_dict(d)
         self.assertTrue(reloaded.default_ping)
 
+    async def test_inline_react_tag_single_emoji(self):
+        msg = self._create_mock_message("hello")
+        item = AutoResponderItem(
+            id="ir1",
+            triggers=["hello"],
+            replies=["Welcome {user}! {react: :wave:}"],
+            reply_to_message=True,
+        )
+
+        with patch.object(self.cog.storage, "record_hit", new=AsyncMock()):
+            await self.cog._dispatch_response(msg, item)
+
+        msg.reply.assert_called_once()
+        self.assertEqual(msg.reply.call_args[1]["content"], "Welcome Alice!")
+        msg.add_reaction.assert_called_once_with("👋")
+
+    async def test_inline_react_tag_multiple_emojis(self):
+        msg = self._create_mock_message("great")
+        item = AutoResponderItem(
+            id="ir2",
+            triggers=["great"],
+            replies=["{react: :fire:} {react: :heart:} Amazing!"],
+            reply_to_message=True,
+        )
+
+        with patch.object(self.cog.storage, "record_hit", new=AsyncMock()):
+            await self.cog._dispatch_response(msg, item)
+
+        msg.reply.assert_called_once()
+        self.assertEqual(msg.reply.call_args[1]["content"], "Amazing!")
+        calls = [c[0][0] for c in msg.add_reaction.call_args_list]
+        self.assertEqual(calls, ["🔥", "❤️"])
+
+    async def test_inline_react_tag_only_no_text_reply(self):
+        msg = self._create_mock_message("agree")
+        item = AutoResponderItem(
+            id="ir3",
+            triggers=["agree"],
+            replies=["{react: :thumbsup:}"],
+            reply_to_message=True,
+        )
+
+        with patch.object(self.cog.storage, "record_hit", new=AsyncMock()):
+            await self.cog._dispatch_response(msg, item)
+
+        # No empty text message sent
+        msg.reply.assert_not_called()
+        msg.channel.send.assert_not_called()
+        msg.add_reaction.assert_called_once_with("👍")
+
+    async def test_inline_react_tag_guild_custom_emoji(self):
+        import discord
+        msg = self._create_mock_message("cool")
+        custom_emoji = MagicMock(spec=discord.Emoji)
+        custom_emoji.name = "nexora_star"
+        custom_emoji.id = 998877
+        msg.guild.emojis = [custom_emoji]
+
+        item = AutoResponderItem(
+            id="ir4",
+            triggers=["cool"],
+            replies=["Nice one! {react: :nexora_star:}"],
+            reply_to_message=True,
+        )
+
+        with patch.object(self.cog.storage, "record_hit", new=AsyncMock()):
+            await self.cog._dispatch_response(msg, item)
+
+        msg.reply.assert_called_once()
+        self.assertEqual(msg.reply.call_args[1]["content"], "Nice one!")
+        msg.add_reaction.assert_called_once_with(custom_emoji)
+
 
 if __name__ == "__main__":
     unittest.main()
