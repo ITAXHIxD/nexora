@@ -146,6 +146,42 @@ COMMAND_DATA = {
         "related": ["status", "botinfo"],
     },
 
+    # ── QUOTE SYSTEM ─────────────────────────────────────────────────────────────
+    "quote": {
+        "name": "quote",
+        "aliases": ["q"],
+        "category": "utility",
+        "premium": False,
+        "admin": False,
+        "description": "Create a high-fidelity atmospheric quote card with message jump link",
+        "usage": [
+            "n!quote",
+            "n!quote <message_link>",
+            "/quote [message_link]",
+            "/quote channel [channel]",
+            "/quote settings",
+            "/quote toggle [enabled]",
+            "/quote exclude <channel>",
+            "/quote logchannel [channel]",
+        ],
+        "examples": [
+            "n!quote (while replying to a message)",
+            "n!quote https://discord.com/channels/123/456/789",
+            "/quote message_link: https://discord.com/channels/123/456/789",
+            "/quote channel #quotes",
+            "/quote settings",
+        ],
+        "notes": [
+            "Right-click or long-press any message ➔ **Apps** ➔ **Quote Message** for instant 1-click quoting",
+            "Generates a sleek dark quote card featuring author avatar, quote text, and original jump link",
+            "Each quote card features an interactive **[ 🗑️ Remove my Quote ]** button",
+            "Only the quote creator or server moderators can remove quote cards",
+            "Admins can set the target channel using `/quote channel #quotes`",
+            "Mention suppression protects against unintended @everyone or role pings",
+        ],
+        "related": ["status", "help"],
+    },
+
     # ── BIRTHDAY ──────────────────────────────────────────────────────────────
     "setbirthday": {
         "name": "setbirthday",
