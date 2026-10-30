@@ -9,7 +9,7 @@
       "color": "0x99AAB5",
       "features": {
         "vanity_roles": 0,
-        "custom_responses": 0,
+        "custom_responses": 10,
         "booster_roles": false,
         "embed_studio": false,
         "server_analytics": false,
@@ -33,7 +33,7 @@
       "color": "0x5DADE2",
       "features": {
         "vanity_roles": 5,
-        "custom_responses": 10,
+        "custom_responses": 25,
         "booster_roles": true,
         "embed_studio": true,
         "server_analytics": true,
@@ -57,7 +57,7 @@
       "color": "0x57F287",
       "features": {
         "vanity_roles": 20,
-        "custom_responses": 30,
+        "custom_responses": 50,
         "booster_roles": true,
         "embed_studio": true,
         "server_analytics": true,

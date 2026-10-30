@@ -76,7 +76,7 @@ SERVER_TIERS = {
         "color":        0x95A5A6,
         "features": {
             "vanity_roles":       0,
-            "custom_responses":   0,
+            "custom_responses":   10,
             "booster_roles":      False,
             "embed_studio":       False,
             "server_analytics":   False,
@@ -95,7 +95,7 @@ SERVER_TIERS = {
         "color":        0x5DADE2,
         "features": {
             "vanity_roles":       5,
-            "custom_responses":   10,
+            "custom_responses":   25,
             "booster_roles":      True,
             "embed_studio":       True,
             "server_analytics":   True,
@@ -114,7 +114,7 @@ SERVER_TIERS = {
         "color":        0x57F287,
         "features": {
             "vanity_roles":       20,
-            "custom_responses":   30,
+            "custom_responses":   50,
             "booster_roles":      True,
             "embed_studio":       True,
             "server_analytics":   True,

@@ -103,17 +103,12 @@ class AutoresponderCreateModal(discord.ui.Modal, title="Create Autoresponder"):
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        if not await self.cog._is_premium(self.guild.id):
-            return await interaction.response.send_message(
-                "❌ **Premium Required**: Server subscription needed. Upgrade with `/premium_price`!",
-                ephemeral=True,
-            )
-
         limit = await self.cog._get_tier_limit(self.guild.id)
         settings, items = await self.cog._get_guild_cached(self.guild.id)
         if limit != -1 and len(items) >= limit:
             return await interaction.response.send_message(
-                f"❌ **Slot Limit Reached**: Your tier allows up to `{limit}` autoresponders.",
+                f"❌ **Slot Limit Reached**: Your tier allows up to `{limit}` autoresponders. "
+                "Upgrade with `/premium_price` for more slots!",
                 ephemeral=True,
             )
 
@@ -392,13 +387,13 @@ class AutoResponder(commands.Cog):
         value = features.get("custom_responses") if isinstance(features, dict) else None
         if value is None:
             value = {
-                "FREE": 0,
-                "BASIC": 10,
-                "PRO": 30,
+                "FREE": 10,
+                "BASIC": 25,
+                "PRO": 50,
                 "ENTERPRISE": -1,
                 "CUSTOM": -1,
                 "GRANDFATHERED": -1,
-            }.get(tier, 0)
+            }.get(tier, 10)
         if isinstance(value, bool):
             return 10 if value else 0
         try:
@@ -442,10 +437,6 @@ class AutoResponder(commands.Cog):
                 return
         except Exception:
             pass
-
-        # Check premium entitlement
-        if not await self._is_premium(message.guild.id):
-            return
 
         # Evaluate against memory cache (zero DB operations)
         settings, items = await self._get_guild_cached(message.guild.id)
@@ -635,13 +626,6 @@ class AutoResponder(commands.Cog):
     @commands.guild_only()
     async def autoresponder(self, ctx: commands.Context):
         """View all active autoresponders configured in this server."""
-        if not await self._is_premium(ctx.guild.id):
-            return await ctx.send(
-                "❌ **Premium Required**: Autoresponders require an active server subscription. "
-                "Use `/premium_price` to upgrade!",
-                ephemeral=True,
-            )
-
         settings, items = await self._get_guild_cached(ctx.guild.id)
         limit = await self._get_tier_limit(ctx.guild.id)
         limit_str = "Unlimited" if limit == -1 else str(limit)
@@ -690,9 +674,6 @@ class AutoResponder(commands.Cog):
         channel: Optional[discord.TextChannel] = None,
         role: Optional[discord.Role] = None,
     ):
-        if not await self._is_premium(ctx.guild.id):
-            return await ctx.send("❌ **Premium Required**: Server subscription needed.", ephemeral=True)
-
         mode_val = (
             match_mode.value
             if isinstance(match_mode, app_commands.Choice)
@@ -829,9 +810,6 @@ class AutoResponder(commands.Cog):
         priority: Optional[int] = None,
         cooldown: Optional[float] = None,
     ):
-        if not await self._is_premium(ctx.guild.id):
-            return await ctx.send("❌ **Premium Required**.", ephemeral=True)
-
         settings, items = await self._get_guild_cached(ctx.guild.id)
         target = self._find_item(items, identifier)
         if not target:
@@ -910,9 +888,6 @@ class AutoResponder(commands.Cog):
     @commands.guild_only()
     @app_commands.describe(identifier="ID, name, or trigger of the responder to delete")
     async def ar_delete(self, ctx: commands.Context, identifier: str):
-        if not await self._is_premium(ctx.guild.id):
-            return await ctx.send("❌ **Premium Required**.", ephemeral=True)
-
         settings, items = await self._get_guild_cached(ctx.guild.id)
         target = self._find_item(items, identifier)
         if not target:
@@ -933,9 +908,6 @@ class AutoResponder(commands.Cog):
     @commands.guild_only()
     @app_commands.describe(identifier="ID, name, or trigger of the responder to inspect")
     async def ar_show(self, ctx: commands.Context, identifier: str):
-        if not await self._is_premium(ctx.guild.id):
-            return await ctx.send("❌ **Premium Required**.", ephemeral=True)
-
         _, items = await self._get_guild_cached(ctx.guild.id)
         target = self._find_item(items, identifier)
         if not target:

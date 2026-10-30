@@ -14,6 +14,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import discord
+
 from utils.autoresponder_engine import (
     AutoResponderEngine,
     AutoResponderItem,
@@ -587,6 +589,85 @@ class TestAutoresponderMentionsAndReactions(unittest.IsolatedAsyncioTestCase):
         msg.reply.assert_called_once()
         self.assertEqual(msg.reply.call_args[1]["content"], "Nice one!")
         msg.add_reaction.assert_called_once_with(custom_emoji)
+
+
+class TestAutoresponderFreeTier(unittest.IsolatedAsyncioTestCase):
+    """Test that autoresponder is free for all guilds with 10 slots and proper tier limits."""
+
+    def setUp(self):
+        from cogs.premium.autoreply import AutoResponder
+        self.bot = MagicMock()
+        self.bot.is_premium_guild = MagicMock(return_value=False)
+        self.bot.get_premium_tier = AsyncMock(return_value="FREE")
+        self.bot.get_tier_config = MagicMock(return_value={
+            "features": {"custom_responses": 10}
+        })
+        self.cog = AutoResponder(self.bot)
+
+    async def test_free_tier_limit_defaults_to_10(self):
+        """Free tier servers get 10 autoresponders by default."""
+        limit = await self.cog._get_tier_limit(123456)
+        self.assertEqual(limit, 10)
+
+    async def test_paid_tier_limits(self):
+        """Higher tiers get higher limits."""
+        self.bot.get_premium_tier = AsyncMock(return_value="BASIC")
+        self.bot.get_tier_config = MagicMock(return_value={"features": {"custom_responses": 25}})
+        self.assertEqual(await self.cog._get_tier_limit(123), 25)
+
+        self.bot.get_premium_tier = AsyncMock(return_value="PRO")
+        self.bot.get_tier_config = MagicMock(return_value={"features": {"custom_responses": 50}})
+        self.assertEqual(await self.cog._get_tier_limit(123), 50)
+
+        self.bot.get_premium_tier = AsyncMock(return_value="ENTERPRISE")
+        self.bot.get_tier_config = MagicMock(return_value={"features": {"custom_responses": -1}})
+        self.assertEqual(await self.cog._get_tier_limit(123), -1)
+
+    async def test_on_message_triggers_for_free_server(self):
+        """Free server messages trigger autoresponder without needing premium subscription."""
+        msg = MagicMock(spec=discord.Message)
+        msg.author = MagicMock(spec=discord.Member)
+        msg.author.id = 12345
+        msg.author.bot = False
+        msg.author.roles = []
+        msg.author.mention = "<@12345>"
+        msg.author.display_name = "User"
+        msg.webhook_id = None
+        msg.guild = MagicMock(spec=discord.Guild)
+        msg.guild.id = 999
+        msg.channel = MagicMock(spec=discord.TextChannel)
+        msg.channel.id = 888
+        msg.content = "ping"
+        msg.reply = AsyncMock()
+
+        self.bot.get_context = AsyncMock(return_value=MagicMock(valid=False))
+
+        settings = GuildAutoResponderSettings(enabled=True)
+        item = AutoResponderItem(id="test1", triggers=["ping"], replies=["pong"])
+        self.cog._guild_cache[999] = (settings, [item])
+
+        with patch.object(self.cog.storage, "record_hit", new=AsyncMock()):
+            await self.cog.on_message(msg)
+            await asyncio.sleep(0.05)
+
+        msg.reply.assert_called_once()
+        self.assertEqual(msg.reply.call_args[1]["content"], "pong")
+
+    async def test_slot_limit_enforced_on_free_server(self):
+        """When 10 autoresponders already exist, adding an 11th on Free tier is blocked."""
+        ctx = MagicMock()
+        ctx.guild.id = 999
+        ctx.send = AsyncMock()
+
+        settings = GuildAutoResponderSettings(enabled=True)
+        items = [AutoResponderItem(id=f"item_{i}", triggers=[f"trig_{i}"], replies=["hi"]) for i in range(10)]
+        self.cog._guild_cache[999] = (settings, items)
+
+        await self.cog.ar_add.callback(self.cog, ctx, trigger="new_trig", reply="hello")
+        ctx.send.assert_called_once()
+        call_msg = ctx.send.call_args[0][0]
+        self.assertIn("Slot Limit Reached", call_msg)
+        self.assertIn("10", call_msg)
 
 
 if __name__ == "__main__":
