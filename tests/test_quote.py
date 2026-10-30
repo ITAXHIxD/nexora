@@ -19,7 +19,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from PIL import Image
 
 from cogs.utility.quote import Quote, parse_message_link
-from utils.quote_card import compose_image_quote, generate_quote_card
+from utils.quote_card import (
+    compose_image_quote,
+    generate_quote_card,
+    strip_urls_from_text,
+)
 from utils.quote_storage import (
     GuildQuoteSettings,
     QuoteStorage,
@@ -207,6 +211,56 @@ class TestQuoteCardGeneration(unittest.TestCase):
             author_name="Global Traveler 🌍",
             author_handle="traveler",
             text=text,
+        )
+        self.assertIsNotNone(buf)
+        img = Image.open(buf)
+        self.assertEqual(img.format, "PNG")
+
+    def test_strip_urls_from_text(self):
+        """Test that URLs including Tenor, Giphy, Discord attachments, and generic links are stripped."""
+        raw = "Check this cat: https://tenor.com/view/bored-cat-12345 so cute!"
+        self.assertEqual(strip_urls_from_text(raw), "Check this cat: so cute!")
+
+        discord_link = "Look at file https://cdn.discordapp.com/attachments/123/456/photo.png here"
+        self.assertEqual(strip_urls_from_text(discord_link), "Look at file here")
+
+        only_link = "https://giphy.com/gifs/funny-cat-789"
+        self.assertEqual(strip_urls_from_text(only_link), "")
+
+    def test_quote_card_custom_emoji_jumbo(self):
+        """Single Discord custom emoji renders prominently on the card."""
+        dummy_emoji = Image.new("RGBA", (64, 64), (255, 100, 50, 255))
+        buf = generate_quote_card(
+            author_name="Vinsmoke Sanji",
+            author_handle="itaxhi_xd.",
+            text="<:boredcat:1561002906004496527>",
+            custom_emojis={"1561002906004496527": dummy_emoji},
+        )
+        self.assertIsNotNone(buf)
+        img = Image.open(buf)
+        self.assertEqual(img.width, 960)
+        self.assertEqual(img.height, 540)
+
+    def test_quote_card_custom_emoji_inline(self):
+        """Custom Discord emojis mixed with text render inline."""
+        dummy_emoji = Image.new("RGBA", (64, 64), (50, 150, 255, 255))
+        buf = generate_quote_card(
+            author_name="Vinsmoke Sanji",
+            author_handle="itaxhi_xd.",
+            text="Look at this cat <:boredcat:1561002906004496527> it is so done!",
+            custom_emojis={"1561002906004496527": dummy_emoji},
+        )
+        self.assertIsNotNone(buf)
+        img = Image.open(buf)
+        self.assertEqual(img.width, 960)
+        self.assertEqual(img.height, 540)
+
+    def test_quote_card_ignores_links(self):
+        """Links are stripped from quote text and not rendered on the card."""
+        buf = generate_quote_card(
+            author_name="User",
+            author_handle="user",
+            text="Check out https://tenor.com/view/cat-123 cool gif!",
         )
         self.assertIsNotNone(buf)
         img = Image.open(buf)

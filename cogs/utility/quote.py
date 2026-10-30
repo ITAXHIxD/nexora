@@ -26,7 +26,7 @@ import io
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import aiohttp
 import discord
@@ -44,6 +44,10 @@ from utils.ui import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Global in-memory cache for Discord custom emojis (emoji_id -> PNG bytes)
+_EMOJI_CACHE: Dict[str, bytes] = {}
+CUSTOM_EMOJI_RE = re.compile(r"<(a)?:([a-zA-Z0-9_~]+):(\d+)>")
 
 # Regex matching Discord message links across discord.com, canary, ptb, discordapp.com
 MESSAGE_LINK_REGEX = re.compile(
@@ -478,10 +482,31 @@ class Quote(commands.Cog):
         extra_att_str = ("\n" + "\n".join(extra_att_lines)) if extra_att_lines else ""
 
         # ── LAYOUT ROUTING ──────────────────────────────────────────────────
-        if image_attachment is not None:
-            # ── CASE A: ORIGINAL MESSAGE CONTAINS AN IMAGE ──────────────────
-            # In "card" style, intelligently compose image with ambient dark canvas & rounded corners
-            if settings.render_style == "card":
+        # If no file attachment, check if message contains a linked embed image or GIF (Tenor, Giphy, direct media)
+        linked_image_url = None
+        if image_attachment is None and source_message.embeds:
+            for emb in source_message.embeds:
+                target_url = (emb.image.url if emb.image else None) or (emb.thumbnail.url if emb.thumbnail else None)
+                if target_url:
+                    is_media_url = any(target_url.lower().endswith(ext) for ext in (".gif", ".png", ".jpg", ".jpeg", ".webp")) or "tenor" in target_url.lower() or "giphy" in target_url.lower()
+                    if is_media_url:
+                        linked_image_url = target_url
+                        if settings.render_style == "card":
+                            try:
+                                async with aiohttp.ClientSession() as session:
+                                    async with session.get(target_url, timeout=aiohttp.ClientTimeout(total=4.0)) as resp:
+                                        if resp.status == 200:
+                                            img_bytes = await resp.read()
+                                            card_buf = await asyncio.to_thread(compose_image_quote, img_bytes)
+                                            if card_buf:
+                                                quote_file = discord.File(card_buf, filename="quote.png")
+                            except Exception as e:
+                                logger.debug("Failed to compose embedded link image: %s", e)
+                        break
+
+        if image_attachment is not None or (linked_image_url and quote_file):
+            # ── CASE A: ORIGINAL MESSAGE CONTAINS AN IMAGE OR LINKED GIF ────
+            if image_attachment is not None and settings.render_style == "card" and not quote_file:
                 img_bytes: Optional[bytes] = None
                 try:
                     img_bytes = await image_attachment.read()
@@ -498,8 +523,15 @@ class Quote(commands.Cog):
                         quote_file = None
 
             embed_desc_lines = [f"[Jump to original message]({jump_url})"]
-            if content:
-                embed_desc_lines.append(f"\n>>> {content}")
+            # Ignore gif and attachment links from text in the description
+            clean_desc_text = re.sub(
+                r"https?://(?:(?:www\.)?tenor\.com/\S+|giphy\.com/\S+|(?:cdn|media)\.discordapp\.(?:com|net)/attachments/\S+|\S+\.(?:gif|png|jpg|jpeg|webp)(?:\?\S*)?)",
+                "",
+                content,
+                flags=re.IGNORECASE,
+            ).strip()
+            if clean_desc_text:
+                embed_desc_lines.append(f"\n>>> {clean_desc_text}")
             if extra_att_str:
                 embed_desc_lines.append(extra_att_str)
 
@@ -514,8 +546,10 @@ class Quote(commands.Cog):
             )
             if quote_file:
                 embed.set_image(url="attachment://quote.png")
-            else:
+            elif image_attachment:
                 embed.set_image(url=image_attachment.url)
+            elif linked_image_url:
+                embed.set_image(url=linked_image_url)
 
             embed.set_footer(
                 text=f"Quoted by {user.display_name} • #{channel_name}",
@@ -530,6 +564,25 @@ class Quote(commands.Cog):
             except Exception as e:
                 logger.debug("Failed to read author avatar bytes: %s", e)
 
+            # Resolve Discord custom emojis (<:name:id> or <a:name:id>)
+            emoji_ids = list({m.group(3) for m in CUSTOM_EMOJI_RE.finditer(content)})
+            custom_emojis: Dict[str, bytes] = {}
+            if emoji_ids:
+                async with aiohttp.ClientSession() as session:
+                    for eid in emoji_ids:
+                        if eid in _EMOJI_CACHE:
+                            custom_emojis[eid] = _EMOJI_CACHE[eid]
+                            continue
+                        try:
+                            url = f"https://cdn.discordapp.com/emojis/{eid}.png?size=96&quality=lossless"
+                            async with session.get(url, timeout=aiohttp.ClientTimeout(total=3.0)) as resp:
+                                if resp.status == 200:
+                                    data = await resp.read()
+                                    _EMOJI_CACHE[eid] = data
+                                    custom_emojis[eid] = data
+                        except Exception as e:
+                            logger.debug("Failed to fetch custom emoji %s: %s", eid, e)
+
             try:
                 card_buf = await asyncio.to_thread(
                     generate_quote_card,
@@ -539,6 +592,7 @@ class Quote(commands.Cog):
                     avatar_bytes=avatar_bytes,
                     channel_name=channel_name,
                     timestamp_str=timestamp_str,
+                    custom_emojis=custom_emojis,
                 )
                 if card_buf:
                     quote_file = discord.File(card_buf, filename="quote.png")
@@ -561,8 +615,14 @@ class Quote(commands.Cog):
         # ── CASE C: FALLBACK OR NON-IMAGE ATTACHMENT ONLY ───────────────────
         if embed is None:
             embed_desc_lines = [f"[Jump to original message]({jump_url})"]
-            if content:
-                embed_desc_lines.append(f"\n>>> {content}")
+            clean_desc_text = re.sub(
+                r"https?://(?:(?:www\.)?tenor\.com/\S+|giphy\.com/\S+|(?:cdn|media)\.discordapp\.(?:com|net)/attachments/\S+|\S+\.(?:gif|png|jpg|jpeg|webp)(?:\?\S*)?)",
+                "",
+                content,
+                flags=re.IGNORECASE,
+            ).strip()
+            if clean_desc_text:
+                embed_desc_lines.append(f"\n>>> {clean_desc_text}")
             elif other_attachments:
                 embed_desc_lines.append("\n> _[Shared an attachment]_")
             if extra_att_str:
