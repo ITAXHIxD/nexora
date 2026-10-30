@@ -10,6 +10,7 @@ import datetime
 import json
 import logging
 import os
+import re
 import time
 from typing import Optional
 
@@ -218,27 +219,31 @@ class AFK(commands.Cog):
 
     async def get_afk(self, user_id: int) -> Optional[dict]:
         uid = int(user_id)
-        if uid not in self.active_afk_cache and uid not in self.local_cache:
-            return None
+        # Fast hit: local cache
+        if uid in self.local_cache:
+            self.active_afk_cache.add(uid)
+            return self.local_cache[uid]
 
+        # Sync from MongoDB if connected
         if self.col is not None:
             try:
                 doc = await self.col.find_one({"_id": uid})
+                if not doc:
+                    doc = await self.col.find_one({"_id": str(uid)})
                 if doc:
                     self.active_afk_cache.add(uid)
                     self.local_cache[uid] = doc
                     return doc
-                else:
-                    doc = await self.col.find_one({"_id": str(uid)})
-                    if doc:
-                        self.active_afk_cache.add(uid)
-                        self.local_cache[uid] = doc
-                        return doc
-                    self.active_afk_cache.discard(uid)
             except Exception as e:
                 logger.warning("AFK: MongoDB find error, falling back to local: %s", e)
 
-        return self.local_cache.get(uid)
+        data = self.local_cache.get(uid)
+        if data:
+            self.active_afk_cache.add(uid)
+            return data
+
+        self.active_afk_cache.discard(uid)
+        return None
 
     async def set_afk(self, user_id: int, data: dict):
         uid = int(user_id)
@@ -361,11 +366,20 @@ class AFK(commands.Cog):
     @commands.guild_only()
     @commands.cooldown(1, 3, commands.BucketType.user)
     async def afk_prefix(self, ctx: commands.Context, *, reason: Optional[str] = "AFK"):
-        """Prefix command for setting AFK. Supports '-g' or '--global' flag anywhere in reason."""
+        """Prefix command for setting AFK. Global by default; supports '-s' or '--server' flag for server-only."""
         raw = (reason or "AFK").strip()
-        global_afk = False
+        global_afk = True
 
-        if raw.startswith(("-g ", "--global ")):
+        if raw.startswith(("-s ", "--server ")):
+            global_afk = False
+            raw = raw.split(" ", 1)[1].strip()
+        elif raw in ("-s", "--server"):
+            global_afk = False
+            raw = "AFK"
+        elif " -s" in raw or " --server" in raw:
+            global_afk = False
+            raw = raw.replace(" -s", "").replace(" --server", "").strip() or "AFK"
+        elif raw.startswith(("-g ", "--global ")):
             global_afk = True
             raw = raw.split(" ", 1)[1].strip()
         elif raw in ("-g", "--global"):
@@ -401,14 +415,14 @@ class AFK(commands.Cog):
     @app_commands.command(name="afk", description="💤 Set your AFK status")
     @app_commands.describe(
         reason="Reason for going AFK",
-        global_afk="Apply across all servers (default: false)"
+        global_afk="Apply across all servers (default: true)"
     )
     @app_commands.guild_only()
     async def afk_slash(
         self,
         interaction: discord.Interaction,
         reason: Optional[str] = "AFK",
-        global_afk: Optional[bool] = False,
+        global_afk: Optional[bool] = True,
     ):
         """Slash command for setting AFK with primary reason option."""
         async def send_fn(*args, **kwargs):
@@ -421,9 +435,33 @@ class AFK(commands.Cog):
             interaction.user,
             interaction.guild,
             reason or "AFK",
-            bool(global_afk),
+            bool(global_afk if global_afk is not None else True),
             send_fn,
         )
+
+    @app_commands.command(name="unafk", description="👋 Manually remove your AFK status")
+    @app_commands.guild_only()
+    async def unafk_slash(self, interaction: discord.Interaction):
+        """Slash command to manually return from AFK."""
+        afk_data = await self.get_afk(interaction.user.id)
+        if not afk_data:
+            return await interaction.response.send_message("❌ You are not currently AFK!", ephemeral=True)
+
+        try:
+            delta = datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(afk_data["time"])
+            duration = self.format_duration(delta)
+        except Exception:
+            duration = "some time"
+
+        await self.remove_afk_status(interaction.user, interaction.guild)
+
+        view = NexoraView(color=SUCCESS_COLOR, timeout=60)
+        view.add_text(
+            f"# 👋 Welcome Back, {interaction.user.display_name}!\n"
+            f"> Your AFK status was removed. You were away for **{duration}**."
+        )
+        view.add_footer("Nexora AFK Network")
+        await interaction.response.send_message(view=view)
 
     @commands.command(name="unafk", description="👋 Manually remove your AFK status")
     @commands.guild_only()
@@ -529,75 +567,106 @@ class AFK(commands.Cog):
         now_ts = time.time()
         now_dt = datetime.datetime.now(datetime.timezone.utc)
 
-        # 1. Clear the author's AFK status on their first normal message.
-        # AFK commands themselves are excluded so users can inspect/change AFK
-        # settings without accidentally clearing their own status.
-        if message.author.id in self.active_afk_cache:
-            content_lower = message.content.strip().lower()
-            is_afk_command = False
-            for pfx in ("n!", "/", "!"):
-                if content_lower.startswith(tuple(f"{pfx}{c}" for c in ("afk", "unafk", "gafk"))):
-                    is_afk_command = True
-                    break
-            if self.bot.user and (
-                f"<@{self.bot.user.id}>" in content_lower
-                or f"<@!{self.bot.user.id}>" in content_lower
-            ):
-                if any(f" {c}" in content_lower for c in ("afk", "unafk", "gafk")):
-                    is_afk_command = True
+        # 1. Clear the author's AFK status on their first normal message,
+        # but respect a 10-second grace period so typing "bye", "brb", or
+        # an immediate test message right after setting AFK doesn't instantly clear it.
+        if message.author.id in self.active_afk_cache or message.author.id in self.local_cache:
+            set_ts = self._set_timestamps.get(message.author.id, 0)
+            if now_ts - set_ts >= 10.0:
+                content_lower = message.content.strip().lower()
+                is_afk_command = False
+                for pfx in ("n!", "/", "!", "?", "."):
+                    if content_lower.startswith(tuple(f"{pfx}{c}" for c in ("afk", "unafk", "gafk", "afkstatus", "afkclear", "afklist", "afksettings"))):
+                        is_afk_command = True
+                        break
+                if self.bot.user and (
+                    f"<@{self.bot.user.id}>" in content_lower
+                    or f"<@!{self.bot.user.id}>" in content_lower
+                ):
+                    if any(f" {c}" in content_lower for c in ("afk", "unafk", "gafk", "afkstatus", "afkclear", "afklist", "afksettings")):
+                        is_afk_command = True
 
-            if not is_afk_command:
-                afk_data = await self.get_afk(message.author.id)
-                if afk_data:
-                    # Server-only AFK clears only in the server where it was set;
-                    # global AFK clears from any server the member speaks in.
-                    if afk_data.get("global") or afk_data.get("guild_id") == message.guild.id:
-                        delta = now_dt - datetime.datetime.fromisoformat(afk_data["time"])
-                        duration = self.format_duration(delta)
-                        removed = await self.remove_afk_status(message.author, message.guild)
-                        if removed:
-                            view = NexoraView(color=SUCCESS_COLOR, timeout=60)
-                            mention_info = ""
-                            if removed.get("mentions"):
-                                mention_info = f"\n• 📬 You were mentioned **{len(removed['mentions'])}** time(s) while away."
-                            view.add_text(
-                                f"# 👋 Welcome back, {message.author.display_name}!\n"
-                                f"> Your AFK status has been removed (Away for **{duration}**).{mention_info}"
-                            )
-                            view.add_footer("Nexora AFK Network")
-                            await message.channel.send(view=view)
+                if not is_afk_command:
+                    afk_data = await self.get_afk(message.author.id)
+                    if afk_data:
+                        target_guild = int(afk_data.get("guild_id") or 0)
+                        if afk_data.get("global") or not target_guild or target_guild == message.guild.id:
+                            delta = now_dt - datetime.datetime.fromisoformat(afk_data["time"])
+                            duration = self.format_duration(delta)
+                            removed = await self.remove_afk_status(message.author, message.guild)
+                            if removed:
+                                view = NexoraView(color=SUCCESS_COLOR, timeout=60)
+                                mention_info = ""
+                                if removed.get("mentions"):
+                                    mention_info = f"\n• 📬 You were mentioned **{len(removed['mentions'])}** time(s) while away."
+                                view.add_text(
+                                    f"# 👋 Welcome back, {message.author.display_name}!\n"
+                                    f"> Your AFK status has been removed (Away for **{duration}**).{mention_info}"
+                                )
+                                view.add_footer("Nexora AFK Network")
+                                try:
+                                    await message.channel.send(view=view)
+                                except Exception as e:
+                                    logger.warning("Failed to send AFK return notification: %s", e)
 
         # 2. Check if any mentioned users or reply reference target is AFK
         targets_to_check: list[discord.Member | discord.User] = []
+        checked_ids: set[int] = set()
+
+        # A) Explicit Discord mentions
         if message.mentions:
             for m in message.mentions:
-                if not m.bot and m.id != message.author.id:
+                if not m.bot and m.id != message.author.id and m.id not in checked_ids:
                     targets_to_check.append(m)
+                    checked_ids.add(m.id)
 
-        # Check if message is a reply to an AFK member
-        if message.reference and hasattr(message.reference, "resolved"):
-            ref = message.reference.resolved
+        # B) Raw regex mentions (<@id> and <@!id>) to catch members if uncached
+        for raw_id_str in re.findall(r"<@!?(\d+)>", message.content):
+            try:
+                raw_id = int(raw_id_str)
+                if raw_id != message.author.id and raw_id not in checked_ids:
+                    member = message.guild.get_member(raw_id) or self.bot.get_user(raw_id)
+                    if member and not getattr(member, "bot", False):
+                        targets_to_check.append(member)
+                        checked_ids.add(raw_id)
+            except Exception:
+                pass
+
+        # C) Check if message is a reply to an AFK member
+        if message.reference:
+            ref = getattr(message.reference, "resolved", None)
+            if not isinstance(ref, discord.Message):
+                ref = getattr(message.reference, "cached_message", None)
+            if not isinstance(ref, discord.Message) and getattr(message.reference, "message_id", None):
+                try:
+                    ref = await message.channel.fetch_message(message.reference.message_id)
+                except Exception:
+                    ref = None
             if isinstance(ref, discord.Message) and ref.author and not ref.author.bot and ref.author.id != message.author.id:
-                if ref.author.id not in [t.id for t in targets_to_check]:
+                if ref.author.id not in checked_ids:
                     member = message.guild.get_member(ref.author.id) or ref.author
                     targets_to_check.append(member)
+                    checked_ids.add(ref.author.id)
 
         if not targets_to_check:
             return
 
-        afk_mentioned_users = [
-            m for m in targets_to_check
-            if int(m.id) in self.active_afk_cache
-        ]
+        # Filter against active AFK cache or local cache
+        afk_mentioned_users: list[discord.Member | discord.User] = []
+        for m in targets_to_check:
+            uid = int(m.id)
+            if uid in self.active_afk_cache or uid in self.local_cache:
+                afk_mentioned_users.append(m)
+            elif self.col is not None:
+                doc = await self.get_afk(uid)
+                if doc:
+                    afk_mentioned_users.append(m)
 
         if not afk_mentioned_users:
             return
 
-        # Consolidate alerts to avoid multi-message channel clutter
         alert_lines = []
         for mentioned in afk_mentioned_users:
-            # Check 4s cooldown per (author, target) pair to prevent spamming,
-            # but allow different users to always receive AFK notices!
             cooldown_key = (message.author.id, mentioned.id)
             last_alert = self._mention_cooldowns.get(cooldown_key, 0)
             if now_ts - last_alert < 4.0:
@@ -608,30 +677,38 @@ class AFK(commands.Cog):
                 continue
 
             target_guild = int(afk_data.get("guild_id") or 0)
-            if not afk_data.get("global") and target_guild != message.guild.id:
+            if not afk_data.get("global") and target_guild and target_guild != message.guild.id:
                 continue
 
             self._mention_cooldowns[cooldown_key] = now_ts
-            delta = now_dt - datetime.datetime.fromisoformat(afk_data["time"])
-            duration = self.format_duration(delta)
+            time_str = afk_data.get("time")
+            try:
+                dt = datetime.datetime.fromisoformat(time_str)
+                ts = int(dt.timestamp())
+                time_badge = f"<t:{ts}:R>"
+            except Exception:
+                time_badge = "recently"
+
             reason_text = afk_data.get("reason", "AFK")
             alert_lines.append(
-                f"• **{mentioned.display_name}** (`@{mentioned.name}`) is AFK!\n"
-                f"  > **Reason:** {reason_text}\n"
-                f"  > **Away for:** `{duration}`"
+                f"💤 **{mentioned.display_name}** is AFK: {reason_text} — {time_badge}"
             )
 
-            # Record mention & send DM
-            mention_str = f"[{message.author.name} in #{message.channel.name}]({message.jump_url})"
-            if self.col:
-                try:
-                    await self.col.update_one({"_id": mentioned.id}, {"$push": {"mentions": mention_str}})
-                except Exception:
-                    pass
-            if mentioned.id in self.local_cache:
-                self.local_cache[mentioned.id].setdefault("mentions", []).append(mention_str)
-                _save_afk_local(self.local_cache)
+            # Record mention safely
+            try:
+                mention_str = f"[{message.author.name} in #{message.channel.name}]({message.jump_url})"
+                if self.col:
+                    try:
+                        await self.col.update_one({"_id": mentioned.id}, {"$push": {"mentions": mention_str}})
+                    except Exception:
+                        pass
+                if mentioned.id in self.local_cache:
+                    self.local_cache[mentioned.id].setdefault("mentions", []).append(mention_str)
+                    _save_afk_local(self.local_cache)
+            except Exception as rec_err:
+                logger.debug("AFK mention recording failed: %s", rec_err)
 
+            # Send optional DM notification
             if afk_data.get("dm_notifications", True):
                 try:
                     view = NexoraView(color=BRAND_COLOR, timeout=180)
@@ -644,14 +721,19 @@ class AFK(commands.Cog):
                     )
                     view.add_footer("Nexora AFK Alerts")
                     await mentioned.send(view=view)
-                except discord.Forbidden:
-                    pass
+                except Exception as dm_err:
+                    logger.debug("AFK DM notification skipped/failed: %s", dm_err)
 
         if alert_lines:
-            # Reply directly to the message that mentioned the AFK member(s).
-            # This is an ordinary text message, not an embed; suppress pings so
-            # repeating the AFK notice doesn't notify the mentioned members again.
-            reply_text = "💤 **AFK Notice**\n\n" + "\n\n".join(alert_lines)
+            if len(alert_lines) == 1:
+                reply_text = alert_lines[0]
+            else:
+                formatted_items = [
+                    f"• {line[2:].strip()}" if line.startswith("💤") else f"• {line}"
+                    for line in alert_lines
+                ]
+                reply_text = "💤 **AFK Notice:**\n" + "\n".join(formatted_items)
+
             try:
                 await message.reply(
                     reply_text,
@@ -659,8 +741,14 @@ class AFK(commands.Cog):
                     allowed_mentions=discord.AllowedMentions.none(),
                     fail_if_not_exists=False,
                 )
-            except Exception as e:
-                logger.warning("AFK text-reply failed: %s", e)
+            except (discord.Forbidden, discord.HTTPException):
+                try:
+                    await message.channel.send(
+                        reply_text,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                except Exception as e:
+                    logger.warning("AFK message send failed: %s", e)
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
