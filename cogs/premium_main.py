@@ -78,7 +78,7 @@ SERVER_TIERS = {
             "vanity_roles":       0,
             "custom_responses":   10,
             "booster_roles":      False,
-            "embed_studio":       False,
+            "embed_studio":       True,
             "server_analytics":   False,
             "priority_support":   False,
             "message_history":    10,

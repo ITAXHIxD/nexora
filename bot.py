@@ -258,6 +258,8 @@ EXTENSIONS = [
     "cogs.owner.owner",
     "cogs.system.guideline_mode",
     "cogs.system.thread_manager",
+    "cogs.system.command_logger",
+    "cogs.system.terminal_logger",
     "cogs.utility.afk",
     "cogs.utility.steal",
     "cogs.utility.spotifyview",
@@ -585,9 +587,15 @@ class CharacterBot(commands.Bot):
         if not LOG_CHANNEL_ID:
             return
         try:
-            self.log_channel = self.get_channel(int(LOG_CHANNEL_ID))
+            cid = int(str(LOG_CHANNEL_ID).strip())
+            self.log_channel = self.get_channel(cid)
+            if not self.log_channel:
+                try:
+                    self.log_channel = await self.fetch_channel(cid)
+                except Exception:
+                    pass
             if self.log_channel:
-                logger.debug("Logging channel set to: %s", self.log_channel.name)
+                logger.info("Logging channel set to: #%s (%s)", self.log_channel.name, self.log_channel.id)
         except Exception as e:
             logger.debug("Error setting up logging channel: %s", e)
 
@@ -709,12 +717,12 @@ async def on_ready():
     C_RESET = "\033[0m"
 
     banner = f"""
-{C_CYAN}{C_BOLD}  ███╗   ██╗███████╗██╗   ██╗ ██████╗ ██████╗  █████╗ 
-  ████╗  ██║██╔════╝╚██╗ ██╔╝██╔═══██╗██╔══██╗██╔══██╗
-  ██╔██╗ ██║█████╗   ╚████╔╝ ██║   ██║██████╔╝███████║
-  ██║╚██╗██║██╔══╝    ╚██╔╝  ██║   ██║██╔══██╗██╔══██║
-  ██║ ╚████║███████╗   ██║   ╚██████╔╝██║  ██║██║  ██║
-  ╚═╝  ╚═══╝╚══════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝{C_RESET}
+{C_CYAN}{C_BOLD}  ███╗   ██╗███████╗██╗  ██╗ ██████╗ ██████╗  █████╗ 
+  ████╗  ██║██╔════╝╚██╗██╔╝██╔═══██╗██╔══██╗██╔══██╗
+  ██╔██╗ ██║█████╗   ╚███╔╝ ██║   ██║██████╔╝███████║
+  ██║╚██╗██║██╔══╝   ██╔██╗ ██║   ██║██╔══██╗██╔══██║
+  ██║ ╚████║███████╗██╔╝ ██╗╚██████╔╝██║  ██║██║  ██║
+  ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝{C_RESET}
 {C_MAGENTA}  ✦ Interactive Discord Framework · Components V2 Edition ✦{C_RESET}
 
 {C_BLUE}┌─────────────────────────────────────────────────────────────────────────────┐{C_RESET}

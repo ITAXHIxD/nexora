@@ -11,7 +11,7 @@
         "vanity_roles": 0,
         "custom_responses": 10,
         "booster_roles": false,
-        "embed_studio": false,
+        "embed_studio": true,
         "server_analytics": false,
         "priority_support": false,
         "message_history": 10,
