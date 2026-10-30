@@ -628,8 +628,8 @@ class ThreadManager(commands.Cog):
     async def before_check_inactive(self):
         await self.bot.wait_until_ready()
     
-    @commands.hybrid_command(name="setup_thread_manager", description="Configure thread management settings")
-    @app_commands.default_permissions(manage_guild=True)
+    @commands.command(name="setup_thread_manager")
+    @commands.has_permissions(manage_guild=True)
     async def setup_thread_manager(self, ctx: commands.Context):
         """Single command to configure all thread manager settings"""
         
@@ -724,8 +724,7 @@ class ThreadManager(commands.Cog):
         view = ThankHelpersView(self.bot, thread, creator.id, helpers)
         await ctx.send(embed=embed, view=view)
     
-    @commands.hybrid_command(name="helper_stats", description="View helper statistics and rankings")
-    @app_commands.describe(user="The user to view stats for (optional)")
+    @commands.command(name="helper_stats")
     async def helper_stats(self, ctx: commands.Context, user: discord.Member = None):
         """View helper statistics"""
         

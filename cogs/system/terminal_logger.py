@@ -192,7 +192,10 @@ class TerminalLogger(commands.Cog):
 
     async def _log_dispatch_loop(self):
         """Dispatches batched log lines every 2 seconds to avoid rate limits."""
-        await self.bot.wait_until_ready()
+        try:
+            await self.bot.wait_until_ready()
+        except RuntimeError:
+            return
         await asyncio.sleep(3.0)  # Allow ready tasks to settle
 
         while not self.bot.is_closed():
@@ -246,9 +249,9 @@ class TerminalLogger(commands.Cog):
                 logger.debug("Terminal logger dispatch error: %s", e)
                 await asyncio.sleep(5.0)
 
-    # ── Control Commands ──────────────────────────────────────────────────────
+    # ── Control Commands (Prefix Only - saves slash command limit) ────────────
 
-    @commands.hybrid_group(name="terminal_logs", description="Manage live terminal and console logging to Discord", aliases=["cmdlogs", "consolelogs", "terminallog"])
+    @commands.group(name="terminal_logs", aliases=["cmdlogs", "consolelogs", "terminallog"])
     @commands.is_owner()
     async def terminal_logs(self, ctx: commands.Context):
         if ctx.invoked_subcommand is None:

@@ -1829,7 +1829,7 @@ class BirthdayIntro(commands.Cog):
 
         return {"home": home, "free": free, "premium": premium, "setup": setup}
 
-    @commands.hybrid_command(name="birthdayhelp", description="View all birthday commands in an interactive menu")
+    @commands.command(name="birthdayhelp")
     @commands.guild_only()
     async def birthdayhelp(self, ctx: commands.Context):
         """FREE — Interactive help menu for the birthday system."""
@@ -2008,8 +2008,7 @@ class BirthdayIntro(commands.Cog):
         embed.set_footer(text=f"Showing {min(len(upcoming), limit)} of {len(upcoming)}")
         await send_ui(ctx, embed=embed)
 
-    @commands.hybrid_command(name="editbirthday", description="Fix your birthday date if it was parsed wrong")
-    @app_commands.describe(month="Month (1-12)", day="Day (1-31)", year="Year (optional)")
+    @commands.command(name="editbirthday")
     @commands.guild_only()
     async def editbirthday(self, ctx: commands.Context, month: int, day: int, year: Optional[int] = None):
         """FREE — Correct your birthday date."""
@@ -2091,13 +2090,7 @@ class BirthdayIntro(commands.Cog):
         embed.set_footer(text=f"Source: {data.get('source', 'manual')} • Use /editprofile or /editbirthday to change any of this")
         await send_ui(ctx, embed=embed, ephemeral=True)
 
-    @commands.hybrid_command(name="introbdsetup", description="Admin: configure intro & announcement channels")
-    @app_commands.describe(
-        intro_channel="The #introductions channel to watch",
-        announce_channel="Channel for birthday announcements",
-        birthday_role="Role to give members on their birthday (optional)",
-        ping_role="Role to ping in the birthday announcement (optional)",
-    )
+    @commands.command(name="introbdsetup")
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
     async def introbdsetup(
@@ -2130,8 +2123,7 @@ class BirthdayIntro(commands.Cog):
     # PREMIUM COMMANDS
     # ══════════════════════════════════════════════════════════════════════════
 
-    @commands.hybrid_command(name="birthdaywish", description="Customize birthday message and embed text")
-    @app_commands.describe(message="Optional custom embed text. Leave blank to open all settings.")
+    @commands.command(name="birthdaywish")
     @commands.guild_only()
     async def birthdaywish(self, ctx: commands.Context, *, message: Optional[str] = None):
         """FREE — Choose format and customize birthday announcement text."""
@@ -2172,12 +2164,7 @@ class BirthdayIntro(commands.Cog):
         embed.set_footer(text="Use /birthdaywish without text to customize both announcement fields")
         await send_ui(ctx, embed=embed, ephemeral=True)
 
-    @commands.hybrid_command(name="birthdayscope", description="Premium — Choose where your birthday gets announced")
-    @app_commands.describe(scope="server = this server only | mutual = all mutual servers with the bot")
-    @app_commands.choices(scope=[
-        app_commands.Choice(name="This server only", value="server"),
-        app_commands.Choice(name="All mutual servers", value="mutual"),
-    ])
+    @commands.command(name="birthdayscope")
     @commands.guild_only()
     async def birthdayscope(self, ctx: commands.Context, scope: str):
         """PREMIUM — Control where your birthday announcement gets sent"""
@@ -2194,8 +2181,7 @@ class BirthdayIntro(commands.Cog):
             embed.set_footer(text="Only servers that have an announce channel configured will receive it")
         await send_ui(ctx, embed=embed, ephemeral=True)
 
-    @commands.hybrid_command(name="birthdaynotify", description="Choose whether birthday wishes send you a DM")
-    @app_commands.describe(enabled="True = receive DMs when someone wishes you, False = no DMs")
+    @commands.command(name="birthdaynotify")
     @commands.guild_only()
     async def birthdaynotify(self, ctx: commands.Context, enabled: bool):
         """FREE — Control whether you get DMs when people wish you."""
@@ -2207,8 +2193,7 @@ class BirthdayIntro(commands.Cog):
         )
         await send_ui(ctx, embed=embed, ephemeral=True)
 
-    @commands.hybrid_command(name="scanintros", description="Admin: scan past intro messages")
-    @app_commands.describe(limit="Messages to scan (free: 100; premium: 1,000)")
+    @commands.command(name="scanintros")
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
     async def scanintros(self, ctx: commands.Context, limit: int = 100):

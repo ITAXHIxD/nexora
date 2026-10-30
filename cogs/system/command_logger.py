@@ -209,16 +209,16 @@ class CommandLogger(commands.Cog):
 
         await self._dispatch_log(embed, guild_id=guild.id if guild else None)
 
-    # ── Configuration Commands ────────────────────────────────────────────────
+    # ── Configuration Commands (Prefix) ───────────────────────────────────────
 
-    @commands.hybrid_command(name="set_cmd_log", description="Set or change the channel for bot command audit logs", aliases=["setcmdlog"])
+    @commands.command(name="set_cmd_log", aliases=["setcmdlog"])
     @commands.has_permissions(administrator=True)
     @commands.guild_only()
     async def set_cmd_log(self, ctx: commands.Context, channel: Optional[discord.TextChannel] = None):
         target = channel or ctx.channel
         perms = target.permissions_for(ctx.guild.me)
         if not perms.send_messages or not perms.embed_links:
-            return await ctx.send(f"❌ I lack permission to send embeds in {target.mention}!", ephemeral=True)
+            return await ctx.send(f"❌ I lack permission to send embeds in {target.mention}!")
 
         is_owner = False
         if ctx.bot.owner_id:
@@ -254,7 +254,7 @@ class CommandLogger(commands.Cog):
 
         await ctx.send(f"✅ **Command Audit Channel Set**: Configured to {target.mention} ({scope_str}).", ephemeral=True)
 
-    @commands.hybrid_command(name="cmd_log_status", description="Check the status and current channel for command audit logs", aliases=["cmdlogstatus"])
+    @commands.command(name="cmd_log_status", aliases=["cmdlogstatus"])
     @commands.has_permissions(administrator=True)
     async def cmd_log_status(self, ctx: commands.Context):
         global_cid = self.get_global_log_channel_id()

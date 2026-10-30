@@ -648,8 +648,7 @@ class Snipe(commands.Cog):
         )
         await send_view(ctx, view)
 
-    @commands.hybrid_command(name="clearsnipes", description="Clear snipe history for a channel")
-    @app_commands.describe(channel="The channel to clear (optional - clears current channel)")
+    @commands.command(name="clearsnipes")
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
     async def clearsnipes(
@@ -681,7 +680,7 @@ class Snipe(commands.Cog):
         )
         await send_view(ctx, view)
 
-    @commands.hybrid_command(name="snipestats", description="View snipe statistics for the server")
+    @commands.command(name="snipestats")
     @commands.guild_only()
     async def snipestats(self, ctx: commands.Context):
         """Display snipe statistics"""

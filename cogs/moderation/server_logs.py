@@ -224,10 +224,9 @@ class ServerLogs(commands.Cog):
         view.add_row(DismissButton(user_id=ctx.author.id))
         await send_view(ctx, view)
 
-    @commands.hybrid_command(
+    @commands.command(
         name="removelog",
         aliases=["disablelog", "unsetlog"],
-        description="🛑 Disable the server audit log channel",
     )
     @commands.has_permissions(manage_guild=True)
     @commands.guild_only()
@@ -245,9 +244,8 @@ class ServerLogs(commands.Cog):
         view.add_row(DismissButton(user_id=ctx.author.id))
         await send_view(ctx, view)
 
-    @commands.hybrid_command(
+    @commands.command(
         name="logstatus",
-        description="📊 View current server log configuration and active channel",
     )
     @commands.has_permissions(manage_guild=True)
     @commands.guild_only()
