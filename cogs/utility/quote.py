@@ -554,15 +554,9 @@ class Quote(commands.Cog):
                 embed = discord.Embed(
                     description="\n".join(embed_desc_lines),
                     color=0x2B2D31,
-                    timestamp=msg_dt,
                 )
-                # Author is already visually baked into the card (name, handle, avatar),
-                # so omit embed.set_author to avoid duplicate redundant headers.
+                # Author and branding are already visually rendered in the card image.
                 embed.set_image(url="attachment://quote.png")
-                embed.set_footer(
-                    text=f"Quoted by {user.display_name} • #{channel_name}",
-                    icon_url=user.display_avatar.url,
-                )
 
         # ── CASE C: FALLBACK OR NON-IMAGE ATTACHMENT ONLY ───────────────────
         if embed is None:

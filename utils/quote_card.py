@@ -17,27 +17,56 @@ import logging
 import os
 from typing import List, Optional
 
+import math
+from typing import List, Optional, Tuple
+
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 logger = logging.getLogger(__name__)
 
 # Primary font candidates in priority order
+EMOJI_FONTS = [
+    "C:/Windows/Fonts/seguiemj.ttf",
+    "C:/Windows/Fonts/segoeui.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "DejaVuSans.ttf"),
+]
+
 BOLD_FONTS = [
     "C:/Windows/Fonts/segoeuib.ttf",
     "C:/Windows/Fonts/arialbd.ttf",
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "DejaVuSans-Bold.ttf"),
 ]
 
+ITALIC_FONTS = [
+    "C:/Windows/Fonts/segoeuii.ttf",
+    "C:/Windows/Fonts/ariali.ttf",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "DejaVuSans-Oblique.ttf"),
+]
+
 REGULAR_FONTS = [
     "C:/Windows/Fonts/segoeui.ttf",
     "C:/Windows/Fonts/arial.ttf",
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "DejaVuSans-Bold.ttf"),
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "DejaVuSans.ttf"),
 ]
 
 
-def _get_font(size: int = 24, bold: bool = False) -> ImageFont.FreeTypeFont:
+def _get_font(
+    size: int = 24,
+    bold: bool = False,
+    italic: bool = False,
+    emoji: bool = False,
+) -> ImageFont.FreeTypeFont:
     """Load the best available TrueType font at the specified size."""
-    candidates = BOLD_FONTS if bold else REGULAR_FONTS
+    if emoji:
+        candidates = EMOJI_FONTS
+    elif italic:
+        candidates = ITALIC_FONTS
+    elif bold:
+        candidates = BOLD_FONTS
+    else:
+        candidates = REGULAR_FONTS
+
     for path in candidates:
         if os.path.exists(path):
             try:
@@ -45,6 +74,14 @@ def _get_font(size: int = 24, bold: bool = False) -> ImageFont.FreeTypeFont:
             except Exception:
                 pass
     return ImageFont.load_default(size=size)
+
+
+def _is_color_font(font: ImageFont.FreeTypeFont) -> bool:
+    """Check if font is a Windows color emoji font (seguiemj)."""
+    font_path = getattr(font, "path", "")
+    if isinstance(font_path, str) and "seguiemj" in font_path.lower():
+        return True
+    return False
 
 
 def _wrap_text_pixels(
@@ -84,11 +121,16 @@ def generate_quote_card(
     avatar_bytes: Optional[bytes] = None,
     channel_name: str = "",
     timestamp_str: str = "",
+    watermark: str = "Make it a Quote#6660",
 ) -> Optional[io.BytesIO]:
     """
-    Generate an atmospheric, dark-themed quote card for text-only quotes.
-    Uses standard 16:9 proportions (960x540) matching modern Discord quote cards.
-    Returns io.BytesIO containing optimized PNG bytes, or None on failure.
+    Generate an atmospheric, dark-themed quote card matching 'Make it a Quote'.
+    Features:
+      • 16:9 canvas (960x540) with deep pitch-black background (0, 0, 0).
+      • Grayscale avatar on left with smooth horizontal cosine fade into black.
+      • Horizontally and vertically centered quote text + attribution on right.
+      • Native emoji support and italic author display name.
+      • Subtle watermark bottom-right.
     """
     try:
         clean_text = (text or "").strip()
@@ -97,87 +139,45 @@ def generate_quote_card(
 
         width = 960
         card_h = 540  # Standard 16:9 aspect ratio
-        left_w = 430  # Prominent portrait avatar area
-        right_w = width - left_w - 60  # ~470px content area
-        text_x = left_w + 30
+        left_w = int(width * 0.44)  # ~422px
 
-        # Adaptive typography sizing based on length
-        char_len = len(clean_text)
-        if char_len <= 90:
-            quote_size = 32
-            line_spacing = 12
-        elif char_len <= 220:
-            quote_size = 28
-            line_spacing = 10
-        else:
-            quote_size = 23
-            line_spacing = 7
+        # Pure solid black background
+        card = Image.new("RGBA", (width, card_h), (0, 0, 0, 255))
 
-        font_quote = _get_font(quote_size, bold=False)
-        font_author = _get_font(22, bold=True)
-        font_handle = _get_font(16, bold=False)
-        font_meta = _get_font(11, bold=False)
-
-        # Measure text with a dummy canvas
-        dummy_img = Image.new("RGBA", (10, 10))
-        dummy_draw = ImageDraw.Draw(dummy_img)
-        lines = _wrap_text_pixels(clean_text, font_quote, right_w, dummy_draw)
-
-        # Limit lines to prevent overflow on massive messages
-        if len(lines) > 8:
-            lines = lines[:8]
-            lines[-1] = lines[-1].rstrip("., ") + "…"
-
-        # Measure line heights
-        line_heights: List[int] = []
-        for line in lines:
-            if not line:
-                line_heights.append(quote_size // 2)
-            else:
-                bbox = dummy_draw.textbbox((0, 0), line, font=font_quote)
-                line_heights.append(max(quote_size, bbox[3] - bbox[1]))
-
-        total_quote_h = sum(line_heights) + max(0, len(lines) - 1) * line_spacing
-        author_block_h = 24 + 4 + 18  # Name (24) + gap (4) + handle (18)
-        gap = 22
-        content_total_h = total_quote_h + gap + author_block_h
-
-        # Dynamic height expansion only if content genuinely exceeds 16:9 canvas
-        if content_total_h + 100 > card_h:
-            card_h = min(680, content_total_h + 100)
-
-        # Deep, sleek dark background (charcoal-black #0b0c10)
-        card = Image.new("RGBA", (width, card_h), (11, 12, 16, 255))
-
-        # Left section: Atmospheric avatar blend with full vertical presence
+        # 1. Left section: Grayscale avatar with smooth horizontal cosine fade
         if avatar_bytes:
             try:
                 with Image.open(io.BytesIO(avatar_bytes)) as av_raw:
-                    av_rgb = av_raw.convert("RGBA")
-                    src_w, src_h = av_rgb.size
+                    # Convert to punchy atmospheric grayscale
+                    av_gray = av_raw.convert("L").convert("RGBA")
+                    enhancer = ImageEnhance.Contrast(av_gray)
+                    av_gray = enhancer.enhance(1.15)
+                    brightness = ImageEnhance.Brightness(av_gray)
+                    av_gray = brightness.enhance(0.95)
+
+                    src_w, src_h = av_gray.size
                     scale = max(left_w / src_w, card_h / src_h)
                     new_w = int(src_w * scale)
                     new_h = int(src_h * scale)
-                    av_resized = av_rgb.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                    av_resized = av_gray.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
                     # Center crop to left_w x card_h
                     crop_x = max(0, (new_w - left_w) // 2)
                     crop_y = max(0, (new_h - card_h) // 2)
                     av_cropped = av_resized.crop((crop_x, crop_y, crop_x + left_w, crop_y + card_h))
 
-                    # Cinematic contrast & tone
-                    enhancer = ImageEnhance.Brightness(av_cropped)
-                    av_cropped = enhancer.enhance(0.92)
-
-                    # Smooth horizontal alpha gradient mask fading out into pure dark
+                    # Smooth horizontal cosine alpha fade into pure black
                     mask = Image.new("L", (left_w, card_h), 255)
-                    m_draw = ImageDraw.Draw(mask)
-                    fade_start = int(left_w * 0.40)
-                    fade_range = left_w - fade_start
-                    for x in range(fade_start, left_w):
-                        pct = (x - fade_start) / float(fade_range)
-                        alpha = int(255 * (1.0 - (pct ** 1.4)))
-                        m_draw.line([(x, 0), (x, card_h)], fill=max(0, min(255, alpha)))
+                    fade_start = int(left_w * 0.35)
+                    fade_w = left_w - fade_start
+                    for x in range(left_w):
+                        if x < fade_start:
+                            alpha_val = 255
+                        else:
+                            pct = (x - fade_start) / float(fade_w)
+                            alpha_val = int(255 * 0.5 * (1.0 + math.cos(math.pi * pct)))
+                        for y in range(card_h):
+                            mask.putpixel((x, y), max(0, min(255, alpha_val)))
 
                     card.paste(av_cropped, (0, 0), mask)
             except Exception as av_err:
@@ -185,41 +185,164 @@ def generate_quote_card(
 
         draw = ImageDraw.Draw(card)
 
-        # Position right content vertically centered in the generous 16:9 canvas
-        start_y = max(38, (card_h - content_total_h) // 2)
+        # 2. Right section: Text & Attribution layout
+        if avatar_bytes:
+            right_start_x = int(width * 0.44)
+            right_end_x = width - 48
+        else:
+            right_start_x = int(width * 0.10)
+            right_end_x = width - int(width * 0.10)
 
-        # Draw quote text lines
+        right_cx = right_start_x + (right_end_x - right_start_x) // 2
+        max_text_w = right_end_x - right_start_x
+
+        # Adaptive typography sizing based on length
+        char_len = len(clean_text)
+        if char_len <= 60:
+            quote_size = 40
+            line_spacing = 14
+        elif char_len <= 140:
+            quote_size = 32
+            line_spacing = 12
+        elif char_len <= 250:
+            quote_size = 26
+            line_spacing = 10
+        else:
+            quote_size = 20
+            line_spacing = 8
+
+        font_quote = _get_font(quote_size, emoji=True)
+        font_author = _get_font(21, italic=True)
+        font_handle = _get_font(15, bold=False)
+        font_meta = _get_font(12, bold=False)
+
+        # Wrap text lines
+        dummy_img = Image.new("RGBA", (10, 10))
+        dummy_draw = ImageDraw.Draw(dummy_img)
+        lines = _wrap_text_pixels(clean_text, font_quote, max_text_w, dummy_draw)
+
+        # Limit lines to prevent overflow on massive messages
+        if len(lines) > 8:
+            lines = lines[:8]
+            lines[-1] = lines[-1].rstrip("., ") + "…"
+
+        if not lines:
+            lines = ["..."]
+
+        # Measure line heights
+        line_metrics: List[Tuple[int, int]] = []
+        for line in lines:
+            if not line:
+                line_metrics.append((0, quote_size // 2))
+            else:
+                bbox = dummy_draw.textbbox((0, 0), line, font=font_quote)
+                line_w = bbox[2] - bbox[0]
+                line_h = max(quote_size, bbox[3] - bbox[1])
+                line_metrics.append((line_w, line_h))
+
+        total_quote_h = sum(h for _, h in line_metrics) + max(0, len(lines) - 1) * line_spacing
+
+        author_str = f"- {author_name}" if author_name else "- Anonymous"
+        author_bbox = dummy_draw.textbbox((0, 0), author_str, font=font_author)
+        author_w = author_bbox[2] - author_bbox[0]
+        author_h = author_bbox[3] - author_bbox[1]
+
+        handle_str = f"@{author_handle}" if author_handle else ""
+        if handle_str:
+            handle_bbox = dummy_draw.textbbox((0, 0), handle_str, font=font_handle)
+            handle_w = handle_bbox[2] - handle_bbox[0]
+            handle_h = handle_bbox[3] - handle_bbox[1]
+        else:
+            handle_w, handle_h = 0, 0
+
+        gap_quote_author = 24
+        gap_author_handle = 5
+        author_block_h = author_h + (gap_author_handle + handle_h if handle_str else 0)
+        content_total_h = total_quote_h + gap_quote_author + author_block_h
+
+        # Dynamic height expansion if content genuinely exceeds 16:9 canvas
+        if content_total_h + 90 > card_h:
+            card_h = content_total_h + 90
+            # If height changed, re-create card with expanded height
+            card = Image.new("RGBA", (width, card_h), (0, 0, 0, 255))
+            if avatar_bytes:
+                # Re-paste cropped avatar to match new card_h
+                try:
+                    with Image.open(io.BytesIO(avatar_bytes)) as av_raw:
+                        av_gray = av_raw.convert("L").convert("RGBA")
+                        enhancer = ImageEnhance.Contrast(av_gray)
+                        av_gray = enhancer.enhance(1.15)
+                        brightness = ImageEnhance.Brightness(av_gray)
+                        av_gray = brightness.enhance(0.95)
+
+                        src_w, src_h = av_gray.size
+                        scale = max(left_w / src_w, card_h / src_h)
+                        new_w = int(src_w * scale)
+                        new_h = int(src_h * scale)
+                        av_resized = av_gray.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                        crop_x = max(0, (new_w - left_w) // 2)
+                        crop_y = max(0, (new_h - card_h) // 2)
+                        av_cropped = av_resized.crop((crop_x, crop_y, crop_x + left_w, crop_y + card_h))
+
+                        mask = Image.new("L", (left_w, card_h), 255)
+                        fade_start = int(left_w * 0.35)
+                        fade_w = left_w - fade_start
+                        for x in range(left_w):
+                            if x < fade_start:
+                                alpha_val = 255
+                            else:
+                                pct = (x - fade_start) / float(fade_w)
+                                alpha_val = int(255 * 0.5 * (1.0 + math.cos(math.pi * pct)))
+                            for y in range(card_h):
+                                mask.putpixel((x, y), max(0, min(255, alpha_val)))
+
+                        card.paste(av_cropped, (0, 0), mask)
+                except Exception:
+                    pass
+
+        draw = ImageDraw.Draw(card)
+        start_y = max(36, (card_h - content_total_h) // 2)
+
+        # 3. Draw Quote Lines (CENTER-ALIGNED)
         curr_y = start_y
         for i, line in enumerate(lines):
+            line_w, line_h = line_metrics[i]
             if line:
-                draw.text((text_x, curr_y), line, fill=(245, 246, 250, 255), font=font_quote)
-                curr_y += line_heights[i] + line_spacing
+                line_x = right_cx - line_w // 2
+                draw.text(
+                    (line_x, curr_y),
+                    line,
+                    font=font_quote,
+                    fill=(255, 255, 255, 255),
+                    embedded_color=_is_color_font(font_quote),
+                )
+                curr_y += line_h + line_spacing
             else:
                 curr_y += quote_size // 2 + line_spacing
 
-        # Draw author attribution
-        curr_y += gap
-        author_display = f"- {author_name}" if author_name else "- Anonymous"
-        draw.text((text_x, curr_y), author_display, fill=(228, 230, 238, 255), font=font_author)
+        # 4. Draw Author Attribution (CENTER-ALIGNED)
+        curr_y += gap_quote_author - line_spacing
+        author_x = right_cx - author_w // 2
+        draw.text((author_x, curr_y), author_str, font=font_author, fill=(215, 218, 225, 255))
 
-        curr_y += 24 + 4
-        handle_display = f"@{author_handle}" if author_handle else ""
-        if handle_display:
-            draw.text((text_x, curr_y), handle_display, fill=(135, 140, 155, 255), font=font_handle)
+        if handle_str:
+            curr_y += author_h + gap_author_handle
+            handle_x = right_cx - handle_w // 2
+            draw.text((handle_x, curr_y), handle_str, font=font_handle, fill=(125, 130, 142, 255))
 
-        # Discreet branding watermark bottom-right (clean, no bottom-left clutter)
-        wm_text = "NEXORA Quotes"
+        # 5. Subtle Branding Watermark bottom-right
+        wm_text = watermark or "Make it a Quote#6660"
         wm_bbox = draw.textbbox((0, 0), wm_text, font=font_meta)
         wm_w = wm_bbox[2] - wm_bbox[0]
         wm_h = wm_bbox[3] - wm_bbox[1]
         draw.text(
-            (width - wm_w - 16, card_h - wm_h - 14),
+            (width - wm_w - 20, card_h - wm_h - 14),
             wm_text,
-            fill=(70, 75, 90, 255),
+            fill=(75, 78, 88, 255),
             font=font_meta,
         )
 
-        # Apply rounded corner alpha mask to eliminate sharp corners
+        # 6. Rounded corner alpha mask
         corner_mask = Image.new("L", (width, card_h), 0)
         c_draw = ImageDraw.Draw(corner_mask)
         c_draw.rounded_rectangle(
@@ -229,12 +352,12 @@ def generate_quote_card(
         )
         card.putalpha(corner_mask)
 
-        # Clean 1px perimeter border
+        # 7. Clean perimeter outline
         draw = ImageDraw.Draw(card)
         draw.rounded_rectangle(
             [(0, 0), (width - 1, card_h - 1)],
             radius=12,
-            outline=(36, 40, 52, 255),
+            outline=(24, 25, 28, 255),
             width=1,
         )
 
