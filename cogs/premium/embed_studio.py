@@ -522,26 +522,28 @@ class EmbedStudio(commands.Cog):
                 ephemeral=True,
             )
 
-        # 3. If slash command without JSON, open the Visual Composer modal directly
-        if ctx.interaction:
-            await ctx.interaction.response.send_modal(EmbedEditorModal(target_channel=channel))
-            return
+        # 3. Display the Studio Launcher View (for both /embed_studio and n!embed_studio)
+        launcher_view = discord.ui.View(timeout=300)
+        selected_channel_box = {"channel": channel}
 
-        # 4. If prefix command without JSON, display the Studio Launcher View
-        launcher_view = discord.ui.View(timeout=180)
-
-        btn_visual = discord.ui.Button(label="Visual Composer", emoji="🎨", style=discord.ButtonStyle.primary)
-        btn_json = discord.ui.Button(label="Import Discohook JSON", emoji="📋", style=discord.ButtonStyle.secondary)
+        btn_visual = discord.ui.Button(label="Visual Composer", emoji="🎨", style=discord.ButtonStyle.primary, row=0)
+        btn_json = discord.ui.Button(label="Import Discohook JSON", emoji="📋", style=discord.ButtonStyle.success, row=0)
 
         async def visual_click(interaction: discord.Interaction):
             if interaction.user.id != ctx.author.id:
-                return await interaction.response.send_message("❌ This composer belongs to someone else.", ephemeral=True)
-            await interaction.response.send_modal(EmbedEditorModal(target_channel=channel))
+                perms = interaction.user.guild_permissions
+                if not (perms.administrator or perms.manage_guild or perms.manage_messages):
+                    return await interaction.response.send_message("❌ This composer belongs to someone else.", ephemeral=True)
+            await interaction.response.send_modal(EmbedEditorModal(target_channel=selected_channel_box["channel"]))
 
         async def json_click(interaction: discord.Interaction):
             if interaction.user.id != ctx.author.id:
-                return await interaction.response.send_message("❌ This composer belongs to someone else.", ephemeral=True)
-            await interaction.response.send_modal(EmbedJsonImportModal(requester=ctx.author, target_channel=channel))
+                perms = interaction.user.guild_permissions
+                if not (perms.administrator or perms.manage_guild or perms.manage_messages):
+                    return await interaction.response.send_message("❌ This composer belongs to someone else.", ephemeral=True)
+            await interaction.response.send_modal(
+                EmbedJsonImportModal(requester=interaction.user, target_channel=selected_channel_box["channel"])
+            )
 
         btn_visual.callback = visual_click
         btn_json.callback = json_click
@@ -549,13 +551,24 @@ class EmbedStudio(commands.Cog):
         launcher_view.add_item(btn_visual)
         launcher_view.add_item(btn_json)
 
-        target_str = f" Target Channel: {channel.mention}" if channel else ""
+        target_str = f"\n📍 **Target Channel:** {channel.mention}" if channel else "\n📍 **Target Channel:** *Select after previewing (or pass `channel:`)*"
+        studio_embed = discord.Embed(
+            title="🛠️ Nexora Embed & Announcement Studio",
+            description=(
+                "Create, preview, and publish custom Discord announcements and multi-embed layouts.\n"
+                f"{target_str}\n\n"
+                "**Choose a workflow below:**\n"
+                "🎨 **Visual Composer** — Interactive form for Title, Description, Hex Color, Banner Image, and Footer.\n"
+                "📋 **Import Discohook JSON** — Paste raw JSON (multi-line or single-line) from Discohook or any embed generator."
+            ),
+            color=BRAND_COLOR,
+        )
+        studio_embed.set_footer(text="Nexora Studio • Live Ephemeral Preview & Server-Scoped Channel Picker")
+
         await ctx.send(
-            f"🛠️ **Nexora Embed & Announcement Studio**{target_str}\n"
-            "Choose an option below to begin crafting your announcement:\n"
-            "• **Visual Composer**: Modal-based editor for title, body, color, and banners.\n"
-            "• **Import Discohook JSON**: Paste raw JSON from [discohook.org](https://discohook.org) or upload a `.json` file.",
+            embed=studio_embed,
             view=launcher_view,
+            ephemeral=True,
         )
 
 
