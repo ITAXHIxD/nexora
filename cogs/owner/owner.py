@@ -115,23 +115,33 @@ class Owner(commands.Cog):
         try:
             self.bot.tree.clear_commands(guild=None)
             await self.bot.tree.sync()
-            
+            logger.info("[CHANGE] Global slash commands cleared by owner %s", ctx.author)
             await ctx.send("✅ All global slash commands have been cleared.")
         except Exception as e:
+            logger.error("Unsync failed: %s", e)
             await ctx.send(f"❌ Unsync failed: {e}")
+
+    @commands.command(name="reload")
+    @commands.is_owner()
+    async def reload_ext(self, ctx: commands.Context, extension: str):
+        try:
+            await self.bot.reload_extension(extension)
+            logger.info("[CHANGE] 🔄 Reloaded extension '%s' (by %s)", extension, ctx.author)
+            await ctx.send(f"🔄 Reloaded `{extension}` successfully.")
+        except Exception as e:
+            logger.error("Failed to reload extension '%s': %s", extension, e)
+            await ctx.send(f"❌ Failed to reload `{extension}`: `{e}`")
 
 
 async def setup(bot):
-    # This is a bit of a workaround to get the OWNER_ID from the config file.
-    # A cleaner approach is to set bot.owner_id in your main bot file.
-    OWNER_ID =  bot.bot_config.get('owner_id')
+    from utils.config import OWNER_ID as CONFIG_OWNER_ID
+    raw_owner = bot.bot_config.get("owner_id") or CONFIG_OWNER_ID
     try:
-        if isinstance(OWNER_ID, (int, str)):
-            bot.owner_id = int(OWNER_ID)
-        else:
-            bot.owner_id = OWNER_ID
+        if isinstance(raw_owner, (int, str)) and str(raw_owner).strip().isdigit():
+            bot.owner_id = int(str(raw_owner).strip())
+        elif not getattr(bot, "owner_id", None):
+            bot.owner_id = CONFIG_OWNER_ID
     except (ValueError, TypeError):
-        bot.owner_id = None
-        logger.error("OWNER_ID is not a valid integer. Owner-only commands may not work.")
+        bot.owner_id = CONFIG_OWNER_ID
 
     await bot.add_cog(Owner(bot))

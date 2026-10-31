@@ -219,6 +219,7 @@ CREATIVE_ACTIVITIES = [
 
 
 EXTENSIONS = [
+    "cogs.system.terminal_logger",
     "cogs.core.status",
     "cogs.core.help",
     "cogs.analytics.analytics",
@@ -258,8 +259,6 @@ EXTENSIONS = [
     "cogs.owner.owner",
     "cogs.system.guideline_mode",
     "cogs.system.thread_manager",
-    "cogs.system.command_logger",
-    "cogs.system.terminal_logger",
     "cogs.utility.afk",
     "cogs.utility.steal",
     "cogs.utility.spotifyview",
@@ -318,6 +317,7 @@ class CharacterBot(commands.Bot):
             help_command=None,
             case_insensitive=True,
             application_id=app_id,
+            owner_id=OWNER_ID,
         )
 
         self.bot_config = bot_config
@@ -634,8 +634,8 @@ class CharacterBot(commands.Bot):
             except Exception as e:
                 logger.debug("Support webhook dispatch error: %s", e)
 
-        # 2. Send via TextChannel if configured
-        if self.log_channel:
+        # 2. Send via TextChannel only if TerminalLogger is not handling the channel
+        if self.log_channel and "TerminalLogger" not in self.cogs:
             try:
                 await self.log_channel.send(embed=embed)
             except Exception as e:
