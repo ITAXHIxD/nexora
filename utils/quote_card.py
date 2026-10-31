@@ -19,7 +19,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, UnidentifiedImageError
 
 logger = logging.getLogger(__name__)
 
@@ -237,11 +237,12 @@ def generate_quote_card(
         dummy_img = Image.new("RGBA", (10, 10))
         dummy_draw = ImageDraw.Draw(dummy_img)
 
-        font_author = _get_font(21, italic=True)
+        author_str = f"- {author_name}" if author_name else "- Anonymous"
+        has_author_emoji = any(ord(c) > 0x2000 for c in author_str)
+        font_author = _get_font(21, emoji=True) if has_author_emoji else _get_font(21, italic=True)
         font_handle = _get_font(15, bold=False)
         font_meta = _get_font(12, bold=False)
 
-        author_str = f"- {author_name}" if author_name else "- Anonymous"
         author_bbox = dummy_draw.textbbox((0, 0), author_str, font=font_author)
         author_w = author_bbox[2] - author_bbox[0]
         author_h = author_bbox[3] - author_bbox[1]
@@ -301,7 +302,13 @@ def generate_quote_card(
 
             curr_y = start_y + em_size + gap_emoji_author
             author_x = right_cx - author_w // 2
-            draw.text((author_x, curr_y), author_str, font=font_author, fill=(215, 218, 225, 255))
+            draw.text(
+                (author_x, curr_y),
+                author_str,
+                font=font_author,
+                fill=(215, 218, 225, 255),
+                embedded_color=_is_color_font(font_author),
+            )
             if handle_str:
                 curr_y += author_h + gap_author_handle
                 handle_x = right_cx - handle_w // 2
@@ -310,7 +317,16 @@ def generate_quote_card(
         else:
             # ── TEXT + INLINE EMOJI DISPLAY ──
             char_len = len(clean_text)
-            if char_len <= 60:
+            no_space = clean_text.replace(" ", "")
+            is_only_unicode_emoji = (
+                bool(no_space)
+                and len(no_space) <= 8
+                and all(ord(c) > 0x2000 for c in no_space)
+            )
+            if is_only_unicode_emoji:
+                quote_size = 72
+                line_spacing = 16
+            elif char_len <= 60:
                 quote_size = 40
                 line_spacing = 14
             elif char_len <= 140:
@@ -445,7 +461,13 @@ def generate_quote_card(
 
             curr_y += gap_quote_author - line_spacing
             author_x = right_cx - author_w // 2
-            draw.text((author_x, curr_y), author_str, font=font_author, fill=(215, 218, 225, 255))
+            draw.text(
+                (author_x, curr_y),
+                author_str,
+                font=font_author,
+                fill=(215, 218, 225, 255),
+                embedded_color=_is_color_font(font_author),
+            )
 
             if handle_str:
                 curr_y += author_h + gap_author_handle
@@ -609,6 +631,9 @@ def compose_image_quote(
             out.seek(0)
             return out
 
+    except UnidentifiedImageError as exc:
+        logger.debug("Invalid or unsupported image data for quote card: %s", exc)
+        return None
     except Exception as exc:
         logger.error("Failed to compose image quote card: %s", exc, exc_info=True)
         return None

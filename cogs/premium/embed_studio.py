@@ -45,6 +45,11 @@ def parse_discohook_json(raw_input: str) -> Tuple[Optional[str], List[discord.Em
         text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
         text = re.sub(r"\n?```$", "", text)
     text = text.strip()
+    # Strip optional leading "json " or "discohook " keyword (e.g. `n!embed_studio json {...}`)
+    text = re.sub(r"^(?:json|discohook)\s+", "", text, flags=re.IGNORECASE).strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text).strip()
 
     try:
         data = json.loads(text)
@@ -427,6 +432,20 @@ class EmbedPreviewView(discord.ui.View):
     async def btn_import_json(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(
             EmbedJsonImportModal(requester=self.requester, target_channel=self.target_channel)
+        )
+
+    @discord.ui.button(label="Export JSON", emoji="📤", style=discord.ButtonStyle.secondary, row=0)
+    async def btn_export_json(self, interaction: discord.Interaction, button: discord.ui.Button):
+        payload = {
+            "content": self.content,
+            "embeds": [e.to_dict() for e in self.embeds],
+        }
+        raw_json = json.dumps(payload, indent=2, ensure_ascii=False)
+        if len(raw_json) > 1900:
+            raw_json = json.dumps(payload, ensure_ascii=False)[:1900]
+        await interaction.response.send_message(
+            f"📤 **Discohook-Compatible JSON Export:**\n```json\n{raw_json}\n```",
+            ephemeral=True,
         )
 
     @discord.ui.button(label="Discard", emoji="🗑️", style=discord.ButtonStyle.danger, row=0)

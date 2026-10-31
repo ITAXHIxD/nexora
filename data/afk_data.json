@@ -1,11 +1,13 @@
 {
-    "1013851779886231685": {
-        "reason": "aise hi mann hua",
-        "time": "2026-02-23T15:06:30.132106+00:00",
-        "name": "\ud835\ude78\ud835\ude9d\ud835\ude8a\ud835\udea1\ud835\ude91\ud835\ude92_\ud835\udea1\ud835\ude73",
-        "guild_id": 1390215980470505523,
+    "1514635364487270416": {
+        "_id": 1514635364487270416,
+        "dm_notifications": true,
+        "global": false,
+        "guild_id": 1342893749209923614,
         "mentions": [],
-        "global": true,
-        "dm_notifications": true
+        "name": "val",
+        "old_nick": "val",
+        "reason": "leavingdc",
+        "time": "2026-10-07T01:22:05.862418+00:00"
     }
 }

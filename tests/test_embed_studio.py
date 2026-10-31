@@ -92,6 +92,13 @@ class TestEmbedStudio(unittest.TestCase):
         self.assertEqual(embeds[0].title, "Embed 1")
         self.assertEqual(embeds[1].title, "Embed 2")
 
+    def test_parse_leading_json_keyword(self):
+        payload = 'json {"title": "Prefixed Embed", "description": "Works with n!embed_studio json {...}"}'
+        content, embeds = parse_discohook_json(payload)
+        self.assertIsNone(content)
+        self.assertEqual(len(embeds), 1)
+        self.assertEqual(embeds[0].title, "Prefixed Embed")
+
     def test_parse_invalid_json(self):
         with self.assertRaises(ValueError) as ctx:
             parse_discohook_json("this is not json {")

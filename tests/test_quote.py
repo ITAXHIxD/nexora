@@ -570,6 +570,51 @@ class TestQuoteExecutionLayouts(unittest.IsolatedAsyncioTestCase):
         self.assertIn("https://discord.com/channels/111/444/777", sent_embed.description)
         self.assertNotIn("This is pure wisdom", sent_embed.description)
 
+    async def test_case_b_text_with_tenor_gif_link_uses_pil_quote_card(self):
+        """When source message has text + a Tenor GIF link (with auto-embed), it still renders Case B PIL card and ignores the GIF link."""
+        guild = MagicMock(id=111, me=MagicMock())
+        user = MagicMock(id=333, display_name="QuoterUser", roles=[])
+        user.display_avatar.url = "https://cdn.discordapp.com/avatars/quoter.png"
+
+        source_channel = MagicMock(id=444, name="general", send=AsyncMock())
+        source_channel.permissions_for.return_value = SimpleNamespace(
+            read_messages=True, read_message_history=True, send_messages=True, embed_links=True
+        )
+
+        source_author = MagicMock(id=789, display_name="Speaker", name="speaker")
+        source_author.display_avatar.read = AsyncMock(return_value=None)
+
+        tenor_embed = MagicMock()
+        tenor_embed.image = None
+        tenor_embed.thumbnail = MagicMock(url="https://media.tenor.com/abc/cat.gif")
+
+        source_msg = MagicMock(
+            id=778,
+            channel=source_channel,
+            author=source_author,
+            clean_content="This is hilarious https://tenor.com/view/funny-cat-12345",
+            attachments=[],
+            embeds=[tenor_embed],
+            created_at=MagicMock(strftime=lambda fmt: "Oct 21, 2026"),
+        )
+
+        respond_mock = AsyncMock()
+        await self.cog._execute_quote(
+            user=user,
+            guild=guild,
+            source_message=source_msg,
+            respond_func=respond_mock,
+            is_interaction=True,
+        )
+
+        source_channel.send.assert_called_once()
+        call_kwargs = source_channel.send.call_args[1]
+        sent_embed = call_kwargs["embed"]
+        self.assertIn("file", call_kwargs)
+        self.assertEqual(call_kwargs["file"].filename, "quote.png")
+        self.assertEqual(sent_embed.image.url, "attachment://quote.png")
+        self.assertIsNone(sent_embed.author.name)
+
 
 class TestQuotePermissionsAndRemoval(unittest.IsolatedAsyncioTestCase):
     """Test permission validation, stateless removal denials, and privacy checks."""
@@ -609,6 +654,25 @@ class TestQuotePermissionsAndRemoval(unittest.IsolatedAsyncioTestCase):
 
         mock_interaction.message.delete.assert_called_once()
         mock_interaction.response.send_message.assert_called_once()
+        self.assertIn("Quote successfully removed", mock_interaction.response.send_message.call_args[0][0])
+
+    async def test_quoted_author_removal_authorized(self):
+        guild_id = 1000
+        quote_msg_id = 2005
+        quoter_id = 5000
+        author_id = 6000
+
+        mock_interaction = MagicMock()
+        mock_interaction.guild = MagicMock(id=guild_id)
+        mock_interaction.message = MagicMock(id=quote_msg_id, delete=AsyncMock())
+        mock_interaction.user = MagicMock(id=author_id)
+        mock_interaction.user.guild_permissions = SimpleNamespace(manage_messages=False, administrator=False)
+        mock_interaction.response = MagicMock(send_message=AsyncMock())
+
+        custom_id = f"quote:delete:{quoter_id}:{author_id}"
+        await self.cog.handle_quote_removal(mock_interaction, custom_id)
+
+        mock_interaction.message.delete.assert_called_once()
         self.assertIn("Quote successfully removed", mock_interaction.response.send_message.call_args[0][0])
 
     async def test_moderator_removal_authorized(self):

@@ -33,7 +33,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils.quote_card import compose_image_quote, generate_quote_card
+from utils.quote_card import compose_image_quote, generate_quote_card, strip_urls_from_text
 from utils.quote_storage import GuildQuoteSettings, QuoteStorage
 from utils.ui import (
     BRAND_COLOR,
@@ -72,17 +72,31 @@ def parse_message_link(link: str) -> Optional[Tuple[int, int, int]]:
 class QuoteCardView(discord.ui.View):
     """
     Stateless view attached to each posted quote card.
-    Encodes the quoter's user ID directly into the button custom_id.
+    Encodes the quoter's and quoted author's user IDs directly into the button custom_id.
     """
 
-    def __init__(self, quoter_id: int):
+    def __init__(self, quoter_id: int, author_id: int = 0, jump_url: Optional[str] = None):
         super().__init__(timeout=None)
+        if jump_url:
+            self.add_item(
+                discord.ui.Button(
+                    label="Original Message",
+                    emoji="🔗",
+                    style=discord.ButtonStyle.link,
+                    url=jump_url,
+                )
+            )
+        custom_id_str = (
+            f"quote:delete:{quoter_id}:{author_id}"
+            if author_id
+            else f"quote:delete:{quoter_id}"
+        )
         self.add_item(
             discord.ui.Button(
                 label="Remove my Quote",
                 emoji="🗑️",
                 style=discord.ButtonStyle.secondary,
-                custom_id=f"quote:delete:{quoter_id}",
+                custom_id=custom_id_str,
             )
         )
 
@@ -240,21 +254,25 @@ class Quote(commands.Cog):
             )
             return
 
-        raw_id = custom_id.split("quote:delete:")[-1]
-        quoter_id = int(raw_id) if raw_id.isdigit() else 0
+        raw_tail = custom_id.split("quote:delete:")[-1]
+        parts = raw_tail.split(":")
+        quoter_id = int(parts[0]) if parts and parts[0].isdigit() else 0
+        author_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
 
         user = interaction.user
-        is_owner = user.id == quoter_id
+        is_owner = (user.id == quoter_id) or (author_id != 0 and user.id == author_id)
         is_mod = (
             user.guild_permissions.manage_messages
             or user.guild_permissions.administrator
             or user.id == self.bot.owner_id
         )
 
-        # Check footer fallback for legacy quotes if quoter_id is 0
+        # Check footer/author fallback for legacy quotes
         if not is_owner and interaction.message and interaction.message.embeds:
             emb = interaction.message.embeds[0]
             if emb.footer and emb.footer.text and f"Quoted by {user.display_name}" in emb.footer.text:
+                is_owner = True
+            elif emb.author and emb.author.name and f"(@{getattr(user, 'name', '')})" in emb.author.name:
                 is_owner = True
 
         if not is_owner and not is_mod:
@@ -482,9 +500,11 @@ class Quote(commands.Cog):
         extra_att_str = ("\n" + "\n".join(extra_att_lines)) if extra_att_lines else ""
 
         # ── LAYOUT ROUTING ──────────────────────────────────────────────────
-        # If no file attachment, check if message contains a linked embed image or GIF (Tenor, Giphy, direct media)
+        clean_text_only = strip_urls_from_text(content)
+
+        # If no file attachment and no text/emoji content, check if message is a standalone GIF/image embed or sticker
         linked_image_url = None
-        if image_attachment is None and source_message.embeds:
+        if image_attachment is None and not clean_text_only and getattr(source_message, "embeds", None):
             for emb in source_message.embeds:
                 target_url = (emb.image.url if emb.image else None) or (emb.thumbnail.url if emb.thumbnail else None)
                 if target_url:
@@ -504,7 +524,31 @@ class Quote(commands.Cog):
                                 logger.debug("Failed to compose embedded link image: %s", e)
                         break
 
-        if image_attachment is not None or (linked_image_url and quote_file):
+        # Support Discord Stickers when no text or image attachment is present
+        if image_attachment is None and not clean_text_only and not linked_image_url:
+            stickers = getattr(source_message, "stickers", None)
+            if isinstance(stickers, (list, tuple)) and stickers:
+                sticker = stickers[0]
+                sticker_url = getattr(sticker, "url", None)
+                if isinstance(sticker_url, str) and sticker_url.startswith("http"):
+                    linked_image_url = sticker_url
+                    if settings.render_style == "card":
+                        try:
+                            async with aiohttp.ClientSession() as session:
+                                async with session.get(sticker_url, timeout=aiohttp.ClientTimeout(total=4.0)) as resp:
+                                    if resp.status == 200:
+                                        img_bytes = await resp.read()
+                                        card_buf = await asyncio.to_thread(compose_image_quote, img_bytes)
+                                        if card_buf:
+                                            quote_file = discord.File(card_buf, filename="quote.png")
+                        except Exception as e:
+                            logger.debug("Failed to compose sticker image: %s", e)
+                if not linked_image_url and not content:
+                    sticker_name = getattr(sticker, "name", "Sticker")
+                    content = f"[{sticker_name}]"
+                    clean_text_only = content
+
+        if image_attachment is not None or linked_image_url:
             # ── CASE A: ORIGINAL MESSAGE CONTAINS AN IMAGE OR LINKED GIF ────
             if image_attachment is not None and settings.render_style == "card" and not quote_file:
                 img_bytes: Optional[bytes] = None
@@ -524,12 +568,7 @@ class Quote(commands.Cog):
 
             embed_desc_lines = [f"[Jump to original message]({jump_url})"]
             # Ignore gif and attachment links from text in the description
-            clean_desc_text = re.sub(
-                r"https?://(?:(?:www\.)?tenor\.com/\S+|giphy\.com/\S+|(?:cdn|media)\.discordapp\.(?:com|net)/attachments/\S+|\S+\.(?:gif|png|jpg|jpeg|webp)(?:\?\S*)?)",
-                "",
-                content,
-                flags=re.IGNORECASE,
-            ).strip()
+            clean_desc_text = strip_urls_from_text(content)
             if clean_desc_text:
                 embed_desc_lines.append(f"\n>>> {clean_desc_text}")
             if extra_att_str:
@@ -615,12 +654,7 @@ class Quote(commands.Cog):
         # ── CASE C: FALLBACK OR NON-IMAGE ATTACHMENT ONLY ───────────────────
         if embed is None:
             embed_desc_lines = [f"[Jump to original message]({jump_url})"]
-            clean_desc_text = re.sub(
-                r"https?://(?:(?:www\.)?tenor\.com/\S+|giphy\.com/\S+|(?:cdn|media)\.discordapp\.(?:com|net)/attachments/\S+|\S+\.(?:gif|png|jpg|jpeg|webp)(?:\?\S*)?)",
-                "",
-                content,
-                flags=re.IGNORECASE,
-            ).strip()
+            clean_desc_text = strip_urls_from_text(content)
             if clean_desc_text:
                 embed_desc_lines.append(f"\n>>> {clean_desc_text}")
             elif other_attachments:
@@ -642,8 +676,13 @@ class Quote(commands.Cog):
                 icon_url=user.display_avatar.url,
             )
 
-        # Stateless interactive view with [ 🗑️ Remove my Quote ]
-        view = QuoteCardView(quoter_id=user.id)
+        # Stateless interactive view with [ 🔗 Original Message ] and [ 🗑️ Remove my Quote ]
+        author_id_val = getattr(author, "id", 0)
+        view = QuoteCardView(
+            quoter_id=user.id,
+            author_id=author_id_val if isinstance(author_id_val, int) else 0,
+            jump_url=jump_url,
+        )
 
         # Post the quote to destination channel
         # Suppress all unintended mass pings from quoted content
@@ -758,42 +797,77 @@ class Quote(commands.Cog):
                         await respond(f"❌ Failed to fetch message: {e}")
                         return
 
-        # If link is provided
+        # If link, message ID, or @user mention is provided
         if not source_message and message_link:
-            parsed = parse_message_link(message_link)
-            if not parsed:
+            arg = message_link.strip()
+            parsed = parse_message_link(arg)
+            if parsed:
+                link_guild_id, link_channel_id, link_message_id = parsed
+                if link_guild_id != ctx.guild.id:
+                    await respond("❌ You cannot quote messages from a different server.")
+                    return
+
+                channel = ctx.guild.get_channel(link_channel_id)
+                if not channel:
+                    try:
+                        channel = await self.bot.fetch_channel(link_channel_id)
+                    except Exception:
+                        channel = None
+
+                if not channel:
+                    await respond("❌ The channel for that message could not be accessed.")
+                    return
+
+                try:
+                    source_message = await channel.fetch_message(link_message_id)
+                except discord.NotFound:
+                    await respond("❌ The referenced message could not be found. It may have been deleted.")
+                    return
+                except discord.Forbidden:
+                    await respond("❌ I do not have permission to read message history in that channel.")
+                    return
+                except Exception as e:
+                    await respond(f"❌ Failed to fetch message: {e}")
+                    return
+
+            elif re.fullmatch(r"\d{15,22}", arg):
+                # Raw message ID in current channel
+                try:
+                    source_message = await ctx.channel.fetch_message(int(arg))
+                except discord.NotFound:
+                    await respond("❌ No message with that ID was found in this channel.")
+                    return
+                except discord.Forbidden:
+                    await respond("❌ I do not have permission to read message history in this channel.")
+                    return
+                except Exception as e:
+                    await respond(f"❌ Failed to fetch message: {e}")
+                    return
+
+            elif m_user := re.fullmatch(r"<@!?(\d{15,22})>", arg):
+                # User mention: find their most recent message in the current channel
+                target_user_id = int(m_user.group(1))
+                invoking_msg_id = ctx.message.id if ctx.message else 0
+                try:
+                    async for hist_msg in ctx.channel.history(limit=50):
+                        if hist_msg.id == invoking_msg_id:
+                            continue
+                        if hist_msg.author.id == target_user_id and (hist_msg.content or hist_msg.attachments or getattr(hist_msg, "stickers", None)):
+                            source_message = hist_msg
+                            break
+                except Exception as e:
+                    await respond(f"❌ Failed to search recent messages: {e}")
+                    return
+
+                if not source_message:
+                    await respond("❌ Could not find a recent message from that user in this channel.")
+                    return
+
+            else:
                 await respond(
-                    "❌ Invalid Discord message link. Please ensure it follows the format:\n"
+                    "❌ Invalid input. Please reply to a message, or provide a valid **Message Link**, **Message ID**, or **@User** mention:\n"
                     "`https://discord.com/channels/<guild_id>/<channel_id>/<message_id>`"
                 )
-                return
-
-            link_guild_id, link_channel_id, link_message_id = parsed
-            if link_guild_id != ctx.guild.id:
-                await respond("❌ You cannot quote messages from a different server.")
-                return
-
-            channel = ctx.guild.get_channel(link_channel_id)
-            if not channel:
-                try:
-                    channel = await self.bot.fetch_channel(link_channel_id)
-                except Exception:
-                    channel = None
-
-            if not channel:
-                await respond("❌ The channel for that message could not be accessed.")
-                return
-
-            try:
-                source_message = await channel.fetch_message(link_message_id)
-            except discord.NotFound:
-                await respond("❌ The referenced message could not be found. It may have been deleted.")
-                return
-            except discord.Forbidden:
-                await respond("❌ I do not have permission to read message history in that channel.")
-                return
-            except Exception as e:
-                await respond(f"❌ Failed to fetch message: {e}")
                 return
 
         # If neither link nor reply was detected, display helpful instructions
@@ -801,14 +875,14 @@ class Quote(commands.Cog):
             help_embed = discord.Embed(
                 title="💬 How to Quote a Message",
                 description=(
-                    "You can quote any message easily using three different methods:\n\n"
+                    "You can quote any message easily using any of these methods:\n\n"
                     "1️⃣ **Message Context Menu (Fastest & Easiest):**\n"
                     "• Right-click or long-press any message ➔ **Apps** ➔ **Quote Message**\n\n"
-                    "2️⃣ **By Message Link:**\n"
-                    "• Copy message link (Right-click ➔ Copy Message Link)\n"
-                    "• Run `/quote message_link: <paste-link>`\n\n"
-                    "3️⃣ **By Replying (Prefix):**\n"
-                    "• Reply to any message with `n!quote`\n"
+                    "2️⃣ **By Replying (Prefix):**\n"
+                    "• Reply to any message with `n!quote` (or `n!q`)\n\n"
+                    "3️⃣ **By Message Link, ID, or @User:**\n"
+                    "• `/quote message_link: <paste-link-or-id>`\n"
+                    "• `n!quote @user` (quotes their latest message in the channel)\n"
                 ),
                 color=BRAND_COLOR,
             )

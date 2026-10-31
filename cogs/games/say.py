@@ -151,7 +151,7 @@ class Say(commands.Cog):
                     ch = await bot.fetch_channel(int(parsed_cid))
                 except Exception:
                     ch = None
-            if ch and isinstance(ch, (discord.TextChannel, discord.Thread)):
+            if ch and isinstance(ch, (discord.TextChannel, discord.Thread, discord.VoiceChannel, discord.StageChannel)):
                 target_channel = ch
                 text = remaining_text
 
