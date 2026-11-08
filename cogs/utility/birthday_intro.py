@@ -1995,6 +1995,45 @@ class BirthdayIntro(commands.Cog):
                 user_id, guild_id,
             )
 
+    async def _already_announced_in_channel_today(
+        self, channel: discord.abc.Messageable, user_id: int, guild_id: int
+    ) -> bool:
+        """
+        Check the last 25 messages in the announcement channel (within the last 20 hours)
+        to see if the bot already posted a birthday announcement for this user.
+        Acts as a 100% stateless safety guard against container/DB migrations.
+        """
+        if not hasattr(channel, "history"):
+            return False
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=20)
+        target_cid = f"birthday-wish-{user_id}-"
+        mention_a = f"<@{user_id}>"
+        mention_b = f"<@!{user_id}>"
+        bot_id = getattr(self.bot.user, "id", None)
+        try:
+            async for msg in channel.history(limit=25, after=cutoff):
+                if bot_id and getattr(msg.author, "id", None) != bot_id:
+                    continue
+                # Check interactive button custom_id
+                for row in getattr(msg, "components", []) or []:
+                    for child in getattr(row, "children", []) or []:
+                        cid = getattr(child, "custom_id", "") or ""
+                        if cid.startswith(target_cid):
+                            return True
+                # Check content + embed title for Birthday mention
+                content = getattr(msg, "content", "") or ""
+                embeds = getattr(msg, "embeds", []) or []
+                embed_text = " ".join(
+                    f"{getattr(e, 'title', '') or ''} {getattr(e, 'description', '') or ''}"
+                    for e in embeds
+                )
+                combined = f"{content} {embed_text}"
+                if "Happy Birthday" in combined and (mention_a in combined or mention_b in combined):
+                    return True
+        except Exception as exc:
+            logger.debug("Channel history deduplication check skipped: %s", exc)
+        return False
+
     async def _mark_birthday_sent(
         self, sent_log: dict, guild_id: int, user_id: int, now: datetime.datetime
     ):
@@ -2185,6 +2224,13 @@ class BirthdayIntro(commands.Cog):
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                     stats["missing_channel"] += 1
                     continue
+
+            # Extra safety check: inspect recent channel history so even if a container/DB
+            # was migrated after an old-version announcement, we never double-post.
+            if await self._already_announced_in_channel_today(channel, doc["_id"], guild.id):
+                await self._mark_birthday_sent(sent_log, guild.id, doc["_id"], server_now)
+                stats["already_sent_today"] += 1
+                continue
 
             # Optional 24h birthday role
             role_id = settings.get("announce_role_id")
