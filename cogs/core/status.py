@@ -126,7 +126,7 @@ class StatusDashboardView(NexoraView):
 
         header = (
             f"# 🤖 Nexora Cluster · {active_tab_title}\n"
-            f"> Online for **{uptime_str}** · Version `2.5.0-pro` · Python `{platform.python_version()}`"
+            f"> Online for **{uptime_str}** · Version `3.0.0-pro` · Python `{platform.python_version()}`"
         )
         self.add_section(header, thumbnail_url=avatar_url)
         self.add_separator(discord.SeparatorSpacing.small)

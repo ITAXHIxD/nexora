@@ -188,38 +188,39 @@ COMMAND_DATA = {
     # ── BIRTHDAY ──────────────────────────────────────────────────────────────
     "setbirthday": {
         "name": "setbirthday",
-        "aliases": [],
+        "aliases": ["bdayset"],
         "category": "utility",
         "premium": False,
         "admin": False,
-        "description": "Set your birthday so the bot can announce it!",
+        "description": "Set your birthday with interactive dropdowns or date input for 00:00 midnight announcements",
         "usage": [
-            "n!setbirthday <date> [year]",
-            "/setbirthday <date> [year]",
+            "n!setbirthday [date] [year]",
+            "/setbirthday [date] [year]",
         ],
         "examples": [
+            "/setbirthday",
+            "n!setbirthday",
             "n!setbirthday 15/04",
-            "n!setbirthday 04/15",
             "n!setbirthday 15/04/2001",
             "n!setbirthday April 15",
             "/setbirthday 15/04 2001",
         ],
         "notes": [
-            "Accepted formats: `15/04` `04/15` `15-04-2001` `15.04` `April 15` `15 April`",
-            "If a numeric date can mean two things, the bot asks you to choose the correct interpretation",
-            "If the date is ambiguous (e.g. `05/06`) two buttons will appear — tap the correct one",
-            "You can update your birthday anytime by running the command again",
-            "The year is optional but needed for age calculation on your birthday",
+            "Run `/setbirthday` with no arguments to open the interactive **Birthday Studio** with Month & Day selectors!",
+            "Accepted text formats: `15/04`, `04/15`, `15-04-2001`, `15.04`, `April 15`, `15 April`",
+            "Announces automatically at **00:00 midnight** in your server's configured local UTC timezone",
+            "If a numeric date is ambiguous (e.g. `05/06`), interactive confirmation buttons appear",
+            "Includes quick buttons to customize your wish style (`/birthdaywish`) and view your profile",
         ],
-        "related": ["birthday", "birthdaylist", "editbirthday", "editprofile", "myprofile"],
+        "related": ["birthday", "birthdaylist", "birthdaywish", "introbdsetup", "myprofile"],
     },
     "birthday": {
         "name": "birthday",
-        "aliases": [],
+        "aliases": ["bday"],
         "category": "utility",
         "premium": False,
         "admin": False,
-        "description": "View your or another user's birthday and countdown",
+        "description": "View your or another user's birthday, zodiac sign, live countdown, and action buttons",
         "usage": [
             "n!birthday [user]",
             "/birthday [user]",
@@ -231,11 +232,12 @@ COMMAND_DATA = {
             "/birthday @Alex",
         ],
         "notes": [
-            "Leave `user` blank to check your own birthday",
-            "Shows the date, days until next birthday, and age if year was provided",
-            "On the birthday itself a 🎉 Wish button appears so others can send wishes",
+            "Leave `user` blank to check your own birthday card",
+            "Shows formatted date, zodiac sign, live days countdown, and turning age (if birth year was set)",
+            "Includes quick interactive buttons to set/update your birthday, customize wish messages, or browse upcoming birthdays",
+            "On the birthday itself, a 🎉 **Send Birthday Wish** button appears so members can send wishes",
         ],
-        "related": ["setbirthday", "birthdaylist", "myprofile"],
+        "related": ["setbirthday", "birthdaylist", "birthdaywish", "myprofile"],
     },
     "birthdaylist": {
         "name": "birthdaylist",
@@ -455,27 +457,30 @@ COMMAND_DATA = {
     },
     "introbdsetup": {
         "name": "introbdsetup",
-        "aliases": [],
+        "aliases": ["bdaysetup", "birthdaysetup"],
         "category": "utility",
         "premium": False,
         "admin": True,
-        "description": "Admin — Configure which channel to watch for intros and where to announce birthdays",
+        "description": "Admin — Interactive Birthday & Intro Setup Studio (channels, 00:00 timezone, role & mention pings)",
         "usage": [
-            "n!introbdsetup <intro_channel> <announce_channel> [birthday_role]",
-            "/introbdsetup <intro_channel> <announce_channel> [birthday_role]",
+            "n!bdaysetup",
+            "n!introbdsetup [intro_channel] [announce_channel] [birthday_role] [timezone_offset]",
+            "/introbdsetup [intro_channel] [announce_channel] [birthday_role] [timezone_offset]",
         ],
         "examples": [
-            "n!introbdsetup #introductions #birthdays",
-            "n!introbdsetup #introductions #general @Birthday",
-            "/introbdsetup #introductions #birthdays @🎂Birthday",
+            "/introbdsetup",
+            "n!bdaysetup",
+            "/introbdsetup intro_channel:#introductions announce_channel:#birthdays birthday_role:@🎂Birthday timezone_offset:UTC+05:30",
         ],
         "notes": [
+            "Run `/introbdsetup` or `n!bdaysetup` with no arguments to open the **Interactive Birthday Setup Studio**",
+            "Configure your server's **UTC Timezone Offset** (e.g. `UTC+05:30`, `UTC+00:00`, `UTC-05:00`) so birthdays announce right at **00:00 midnight** local server time!",
+            "Includes dropdown selectors for Intro Channel, Announcement Channel, Birthday Role, Ping Role, and UTC Timezone",
+            "Includes a **🧪 Test Announcement** button to preview how birthday pings and cards look in your channel",
+            "3-layer duplicate guard ensures each member's birthday is announced only once per calendar day",
             "Requires **Manage Server** permission",
-            "Once set, the bot automatically reads new messages in the intro channel",
-            "The birthday role (optional) is given to members on their birthday for 24 hours",
-            "Use `/scanintros` to import recent intro messages retroactively",
         ],
-        "related": ["scanintros", "birthdaylist"],
+        "related": ["scanintros", "setbirthday", "birthday", "birthdaylist"],
     },
     "scanintros": {
         "name": "scanintros",
@@ -655,7 +660,7 @@ COMMAND_DATA = {
         "category": "fun",
         "premium": False,
         "admin": False,
-        "description": "Ship two people together and see their love compatibility 💘",
+        "description": "Ship two people together and see their love compatibility 💘 (Works in Servers, DMs & Group DMs)",
         "usage": [
             "n!ship [user1] [user2]",
             "/ship [user1] [user2]",
@@ -670,18 +675,17 @@ COMMAND_DATA = {
             "/ship user2:random",
         ],
         "notes": [
-            "No args = ships you with a random server member",
-            "One arg = ships you with that person",
-            "Both args = ships those two people together",
-            "Use `random` as either arg to pick a random server member",
+            "Works anywhere on Discord — Servers, 1-on-1 DMs, and Group DMs!",
+            "No args = ships you with a random server/group member (or with Nexora in 1-on-1 DMs)",
+            "One arg = ships you with that person; Both args = ships those two people together",
+            "Use `random` as either arg to pick a random member",
             "Plain text names work too — e.g. `n!ship Alex Blake` (no @mention needed)",
             "Results are **consistent** — the same pair always gets the same % (hash-based)",
             "Use 🔁 **Re-roll** for a random result that changes each time",
             "8 tiers: 💔 Disaster → 🤍 Lukewarm → 💛 Neutral → 💓 Promising → 💕 Great Vibes → 💖 Perfect Match → 💞 SOULMATES",
-            "❤️ **React** button counts how many people react to the ship",
-            "🔗 **Share** posts a public message with the ship result",
+            "❤️ **React** button counts how many people react to the ship; 🔗 **Share** posts publicly",
         ],
-        "related": ["birthday", "afk"],
+        "related": ["vibe", "compliment", "tod"],
     },
     "tod": {
         "name": "tod",
@@ -946,131 +950,6 @@ COMMAND_DATA = {
             "Click 💖 **Another Compliment** to send more love",
         ],
         "related": ["vibe", "tod"],
-    },
-    "tictactoe": {
-        "name": "tictactoe",
-        "aliases": ["ttt"],
-        "category": "fun",
-        "premium": False,
-        "admin": False,
-        "description": "Play Tic-Tac-Toe solo against smart AI or challenge a friend to a duel",
-        "usage": [
-            "n!tictactoe [opponent] [difficulty]",
-            "/tictactoe [opponent] [difficulty]",
-        ],
-        "examples": [
-            "n!tictactoe",
-            "n!tictactoe @Alex",
-            "/tictactoe difficulty:hard",
-            "/tictactoe opponent:@Alex",
-        ],
-        "notes": [
-            "Leave opponent blank or pick yourself/bot for automatic Solo Play vs Nexora AI",
-            "Difficulties for solo play: `easy`, `medium`, `hard` (unbeatable minimax)",
-            "Multiplayer mode: Challenge a friend to a 2-player duel with real-time turns",
-            "Green tile highlighting on winning lines",
-            "Persistent session scoreboards and instant 🔄 Rematch button",
-            "All games automatically saved to MongoDB /gamestats",
-        ],
-        "related": ["connect4", "rps", "guess", "gamestats"],
-    },
-    "connect4": {
-        "name": "connect4",
-        "aliases": ["c4", "fourinrow"],
-        "category": "fun",
-        "premium": False,
-        "admin": False,
-        "description": "Play Connect 4 solo against Nexora AI or challenge a friend to a duel",
-        "usage": [
-            "n!connect4 [opponent] [difficulty]",
-            "/connect4 [opponent] [difficulty]",
-        ],
-        "examples": [
-            "n!connect4",
-            "n!connect4 @Alex",
-            "/connect4 difficulty:hard",
-            "/connect4 opponent:@Alex",
-        ],
-        "notes": [
-            "Leave opponent blank or pick yourself/bot for automatic Solo Play vs Nexora AI",
-            "7 columns x 6 rows board with realistic gravity dropping",
-            "Winning 4-in-a-row chips are highlighted with 🌟 star badges",
-            "Difficulties: `easy`, `medium`, `hard` (tactical threat blocking & center control)",
-            "Score tracking across repeat matches with 🔄 Play Again button",
-            "Records stats and win rates to MongoDB /gamestats",
-        ],
-        "related": ["tictactoe", "rps", "guess", "gamestats"],
-    },
-    "rps": {
-        "name": "rps",
-        "aliases": [],
-        "category": "fun",
-        "premium": False,
-        "admin": False,
-        "description": "Play Rock-Paper-Scissors solo vs Nexora or challenge a friend to a hidden-choice duel",
-        "usage": [
-            "n!rps [opponent]",
-            "/rps [opponent]",
-        ],
-        "examples": [
-            "n!rps",
-            "n!rps @Alex",
-            "/rps opponent:@Alex",
-        ],
-        "notes": [
-            "Solo mode: Fast-paced battle vs Nexora with consecutive win streaks 🔥 and milestone celebrations",
-            "Multiplayer mode: Hidden secret moves via ephemeral buttons until both players choose",
-            "Persistent session score tracking with 🔄 Rematch button",
-            "Integrated with /gamestats leaderboard",
-        ],
-        "related": ["tictactoe", "connect4", "guess", "gamestats"],
-    },
-    "guess": {
-        "name": "guess",
-        "aliases": [],
-        "category": "fun",
-        "premium": False,
-        "admin": False,
-        "description": "Guess the secret number (1-100) solo against Nexora or duel a friend",
-        "usage": [
-            "n!guess [opponent]",
-            "/guess [opponent]",
-        ],
-        "examples": [
-            "n!guess",
-            "n!guess @Alex",
-            "/guess opponent:@Alex",
-        ],
-        "notes": [
-            "Solo mode: Deduce the number within 6 attempts with hot/cold hints and narrowing bounds",
-            "Multiplayer mode: Turn-based deduction race against a friend",
-            "Input numbers easily using Discord pop-up modals",
-            "Persistent records saved to /gamestats",
-        ],
-        "related": ["tictactoe", "connect4", "rps", "gamestats"],
-    },
-    "gamestats": {
-        "name": "gamestats",
-        "aliases": ["game_stats", "leaderboard_games"],
-        "category": "fun",
-        "premium": False,
-        "admin": False,
-        "description": "View your mini-game statistics, win rates, and competitive rank",
-        "usage": [
-            "n!gamestats [member]",
-            "/gamestats [member]",
-        ],
-        "examples": [
-            "n!gamestats",
-            "n!gamestats @Alex",
-            "/gamestats member:@Alex",
-        ],
-        "notes": [
-            "Tracks Tic-Tac-Toe, Connect 4, Rock-Paper-Scissors, and Number Guesser",
-            "Displays visual Unicode win-rate progress bars and competitive ranks (Rookie to Grandmaster)",
-            "Backed by MongoDB Atlas cloud persistence",
-        ],
-        "related": ["tictactoe", "connect4", "rps", "guess"],
     },
     # ── MODERATION ────────────────────────────────────────────────────────────
     "ban": {
@@ -1415,26 +1294,6 @@ COMMAND_DATA = {
         ],
         "related": ["remind", "reminders"],
     },
-    "poll": {
-        "name": "poll",
-        "aliases": [],
-        "category": "utility",
-        "premium": False,
-        "admin": False,
-        "description": "Create an interactive button poll with real-time progress bars",
-        "usage": ["n!poll <question> [options] [duration]", "/poll <question> [options] [duration]"],
-        "examples": [
-            "n!poll What movie to watch? Inception | Interstellar | Oppenheimer",
-            "/poll question:Game night tomorrow? options:Yes, No duration:1h",
-        ],
-        "notes": [
-            "Supports up to 10 options with interactive buttons",
-            "Live Unicode percentage progress bars (`▰▰▰▰▱▱▱`) updating on each vote",
-            "Anti-cheat: one vote per member, clicking again toggles vote",
-            "Creator or staff can end poll anytime with 🛑 End Poll button",
-        ],
-        "related": ["quickpoll"],
-    },
     "quickpoll": {
         "name": "quickpoll",
         "aliases": [],
@@ -1466,40 +1325,9 @@ COMMAND_DATA = {
             "Leave expression blank to open the interactive on-screen button keypad!",
             "Safe AST evaluation — no code execution risk",
             "Supported: `+`, `-`, `*`, `/`, `^`, `%`, `sqrt`, `sin`, `cos`, `tan`, `log`, `pi`, `e`",
+            "Works in Servers, DMs, and Group DMs",
         ],
         "related": [],
-    },
-    "tictactoe": {
-        "name": "tictactoe",
-        "aliases": ["ttt"],
-        "category": "games",
-        "premium": False,
-        "admin": False,
-        "description": "Challenge a friend to an interactive 3x3 Tic-Tac-Toe game",
-        "usage": ["n!tictactoe <opponent>", "/tictactoe <opponent>"],
-        "examples": ["n!tictactoe @Alex", "/tictactoe opponent:@Alex"],
-        "notes": [
-            "Interactive 3x3 Components V2 button grid",
-            "Player X vs Player O with turn enforcement and active status display",
-            "Automatically detects wins/draws and highlights winning tiles in green",
-            "90s turn timeout",
-        ],
-        "related": ["rps", "tod"],
-    },
-    "rps": {
-        "name": "rps",
-        "aliases": [],
-        "category": "games",
-        "premium": False,
-        "admin": False,
-        "description": "Play Rock-Paper-Scissors solo against Nexora or duel a friend",
-        "usage": ["n!rps [opponent]", "/rps [opponent]"],
-        "examples": ["n!rps", "n!rps @Alex", "/rps", "/rps opponent:@Alex"],
-        "notes": [
-            "No opponent = play solo vs Nexora bot with instant results and Play Again button",
-            "With opponent = 2-player secret selection duel where choices are revealed simultaneously",
-        ],
-        "related": ["tictactoe", "tod"],
     },
 
     # ── PREMIUM ───────────────────────────────────────────────────────────────
@@ -1723,7 +1551,7 @@ COMMAND_DATA = {
         "category": "utility",
         "premium": False,
         "admin": True,
-        "description": "Interactive embed builder, Discohook JSON importer, and announcement composer",
+        "description": "Interactive multi-embed builder, 1-click Discohook JSON importer, and announcement composer",
         "usage": ["n!embed_studio [channel] [json_code]", "/embed_studio [channel] [json_code]"],
         "examples": [
             "/embed_studio",
@@ -1732,12 +1560,13 @@ COMMAND_DATA = {
         ],
         "notes": [
             "✨ **Free for all servers** (no premium required)",
-            "📋 **Full Discohook JSON import**: paste export JSON from discohook.org or attach a `.json` file",
-            "🎨 Interactive modal composer for title, description, color, image, and footer",
+            "📋 **1-Click Import JSON Button**: click **📋 Import JSON** directly inside the studio to paste any Discohook JSON or single embed JSON",
+            "🎨 Interactive modal composer for message content, title, description, hex color, fields, author, images, and footer",
+            "🔔 Safe mention controls: toggle Role/User mentions or `@everyone` only when needed",
             "🔒 Strictly server-scoped channel selector (guaranteed never to show other servers' channels)",
             "Requires **Manage Messages**, **Manage Server**, or **Administrator** permission",
         ],
-        "related": ["say", "custom_reply"],
+        "related": ["autoresponder", "say"],
     },
     "server_growth": {
         "name": "server_growth",
@@ -1762,16 +1591,35 @@ COMMAND_DATA = {
         "category": "games",
         "premium": False,
         "admin": False,
-        "description": "Play Tic-Tac-Toe solo vs smart AI or challenge a friend to a PvP duel",
-        "usage": ["n!tictactoe [opponent]", "/tictactoe [opponent] [difficulty]"],
-        "examples": ["/tictactoe", "/tictactoe opponent:@Alex", "/tictactoe difficulty:hard"],
+        "description": "Play Tic-Tac-Toe solo vs smart AI or challenge a friend to a PvP duel (Servers, DMs & Group DMs)",
+        "usage": ["n!tictactoe [opponent] [difficulty]", "/tictactoe [opponent] [difficulty]"],
+        "examples": ["/tictactoe", "/tictactoe opponent:@Alex", "/tictactoe difficulty:hard", "n!ttt @Alex"],
         "notes": [
-            "Leave `opponent` blank to play Solo vs Nexora AI with automatic moves!",
-            "Choose difficulty: `easy` (casual), `medium` (balanced), or `hard` (minimax)",
-            "Highlights winning line in green and includes instant Play Again rematch button",
-            "Saves wins, losses, and win rates to your profile `/gamestats`",
+            "Leave `opponent` blank to play Solo vs Nexora AI (`easy`, `medium`, or unbeatable `hard` minimax)",
+            "🔄 **Infinite Rematches:** Clicking **Rematch / Play Again** spawns a fresh game message so sessions never expire!",
+            "🔔 **Reply Turn Pings:** Turn notifications reply directly to the match board and auto-clean previous pings",
+            "Highlights winning 3-in-a-row line in green and saves records to `/gamestats`",
+            "Works in Servers, 1-on-1 DMs, and Group DMs",
         ],
-        "related": ["rps", "guess", "gamestats"],
+        "related": ["connect4", "rps", "guess", "gamestats"],
+    },
+    "connect4": {
+        "name": "connect4",
+        "aliases": ["c4", "fourinrow"],
+        "category": "games",
+        "premium": False,
+        "admin": False,
+        "description": "Play Connect 4 solo against Nexora AI or challenge a friend to a duel (Servers, DMs & Group DMs)",
+        "usage": ["n!connect4 [opponent] [difficulty]", "/connect4 [opponent] [difficulty]"],
+        "examples": ["/connect4", "/connect4 opponent:@Alex", "/connect4 difficulty:hard", "n!c4 @Alex"],
+        "notes": [
+            "7 columns × 6 rows gravity board with 🌟 winning 4-in-a-row star highlights",
+            "Solo AI difficulties: `easy`, `medium`, and `hard` (tactical threat blocking & center control)",
+            "🔄 **Infinite Rematches:** Clicking **Rematch / Play Again** spawns a fresh game message so sessions never expire!",
+            "🔔 **Reply Turn Pings:** Turn notifications reply directly to the match board and auto-clean previous pings",
+            "Records wins, losses, and win rates to `/gamestats`",
+        ],
+        "related": ["tictactoe", "rps", "guess", "gamestats"],
     },
     "rps": {
         "name": "rps",
@@ -1779,15 +1627,16 @@ COMMAND_DATA = {
         "category": "games",
         "premium": False,
         "admin": False,
-        "description": "Play Rock-Paper-Scissors solo against bot or duel a friend",
+        "description": "Play Rock-Paper-Scissors solo against Nexora or duel a friend (Servers, DMs & Group DMs)",
         "usage": ["n!rps [opponent]", "/rps [opponent]"],
-        "examples": ["/rps", "/rps opponent:@Alex"],
+        "examples": ["/rps", "/rps opponent:@Alex", "n!rps @Alex"],
         "notes": [
-            "Solo mode features live win-streak tracking and witty commentary",
-            "Duel mode features secret locked-in choices and instant rematch button",
-            "Saves win streaks and stats to `/gamestats`",
+            "Solo mode features live win-streak 🔥 tracking and milestone commentary",
+            "Duel mode features secret locked-in choices with a reply ping alerting your opponent",
+            "🔄 **Infinite Rematches:** Clicking **Rematch / Play Again** spawns a brand-new match message so buttons never expire!",
+            "Saves win streaks and match stats to `/gamestats`",
         ],
-        "related": ["tictactoe", "guess", "gamestats"],
+        "related": ["tictactoe", "connect4", "guess", "gamestats"],
     },
     "guess": {
         "name": "guess",
@@ -1795,15 +1644,16 @@ COMMAND_DATA = {
         "category": "games",
         "premium": False,
         "admin": False,
-        "description": "Guess the secret number (1-100) solo against bot or duel a friend",
+        "description": "Guess the secret number (1-100) solo against Nexora or duel a friend (Servers, DMs & Group DMs)",
         "usage": ["n!guess [opponent]", "/guess [opponent]"],
-        "examples": ["/guess", "/guess opponent:@Alex"],
+        "examples": ["/guess", "/guess opponent:@Alex", "n!guess @Alex"],
         "notes": [
-            "Solo: Guess in 6 attempts with hot/cold and higher/lower visual bounds",
-            "Duel: Turn-based race against your opponent to deduce the number first",
+            "Solo: Deduce the secret number in 6 attempts with hot/cold and narrowing range bounds",
+            "Duel: Turn-based deduction race against your opponent with reply-to-board turn pings",
+            "🔄 **Infinite Rematches:** Clicking **Rematch / Play Again** spawns a fresh game message so sessions never expire!",
             "Saves stats to `/gamestats`",
         ],
-        "related": ["tictactoe", "rps", "gamestats"],
+        "related": ["tictactoe", "connect4", "rps", "gamestats"],
     },
     "gamestats": {
         "name": "gamestats",
@@ -1813,13 +1663,45 @@ COMMAND_DATA = {
         "admin": False,
         "description": "View player mini-game win rates, records, and ranking medals",
         "usage": ["n!gamestats [member]", "/gamestats [member]"],
-        "examples": ["/gamestats", "/gamestats member:@Alex"],
+        "examples": ["/gamestats", "/gamestats member:@Alex", "n!gamestats"],
         "notes": [
-            "Shows records for Tic-Tac-Toe, Rock-Paper-Scissors, and Number Guesser",
-            "Includes win rate progress bars and performance ranks (Grandmaster, Veteran, etc.)",
-            "Backed by persistent MongoDB Atlas storage",
+            "Shows records for Tic-Tac-Toe, Connect 4, Rock-Paper-Scissors, and Number Guesser",
+            "Includes Unicode win-rate progress bars and competitive ranks (Rookie to Grandmaster)",
+            "Backed by in-memory cache + persistent MongoDB Atlas storage",
         ],
-        "related": ["tictactoe", "rps", "guess"],
+        "related": ["tictactoe", "connect4", "rps", "guess"],
+    },
+    "owner": {
+        "name": "owner",
+        "aliases": ["panel"],
+        "category": "owner",
+        "premium": False,
+        "admin": False,
+        "description": "Open the interactive Bot Owner Control Panel for live hot-reloading, slash sync, and diagnostics",
+        "usage": ["n!owner", "n!panel"],
+        "examples": ["n!owner", "n!panel"],
+        "notes": [
+            "🔒 **Owner Only** — opens an interactive dashboard with 1-click buttons",
+            "🔄 **Reload All Cogs:** Hot-reload all 65 extensions in ~1 second without restarting the bot",
+            "⚡ **Sync Slash Tree:** Sync global and test-guild slash commands live",
+            "🧹 **Clear Caches:** Flush in-memory caches and run garbage collection",
+        ],
+        "related": ["reload", "say", "premium_grant"],
+    },
+    "reload": {
+        "name": "reload",
+        "aliases": ["rl"],
+        "category": "owner",
+        "premium": False,
+        "admin": False,
+        "description": "Hot-reload one extension (by short name or full path) or all extensions without restarting",
+        "usage": ["n!reload [extension|all]", "n!rl [extension|all]"],
+        "examples": ["n!reload", "n!reload all", "n!reload birthday_intro", "n!reload cogs.utility.embed_builder"],
+        "notes": [
+            "🔒 **Owner Only** — apply code updates live without restarting the process",
+            "Supports short cog names (e.g. `n!reload help`, `n!reload rps`) or `n!reload all`",
+        ],
+        "related": ["owner", "say"],
     },
 }
 
@@ -1988,8 +1870,8 @@ class HelpMainView(HelpLayoutView):
         total_unique = len(canonical_cmds)
 
         header = (
-            "# 🌌 Nexora Help Center\n"
-            "> High-performance multi-purpose Discord bot with MongoDB persistence & Components V2 UI.\n\n"
+            "# 🌌 Nexora Help Center · `v3.0.0-pro`\n"
+            "> High-performance multi-purpose Discord bot with MongoDB persistence, User App DM support & Components V2 UI.\n\n"
             f"**Prefix:** `{p}` or `{p.swapcase()}`  ·  **Slash:** `/`  ·  📚 **{total_unique}** unique commands\n"
             f"**Quick Jump:** `{p}help <command>` or `/help <command>`"
         )
@@ -1997,19 +1879,15 @@ class HelpMainView(HelpLayoutView):
         self.add_separator()
 
         whats_new = (
-            "## ✨ What's New & Highlights\n"
-            "• 📊 **Live Status & Telemetry:** Hardware and RAM metrics, network scale, gateway latency, game activity, and live presence tabs (`/status`, `/ping`).\n"
-            "• 🎭 **Truth & Dare Upgrade:** `/truth`, `/dare`, and `/tod` now use 100+ unique truths AND 100+ unique dares in each tier, with session-level no-repeat selection.\n"
-            "• 🎮 **Multiplayer Game Updates:** Turn-based game alerts and match activity are surfaced in the Games & Fun section of the status dashboard.\n"
-            "• 🤖 **Premium Auto-Responders:** Tier-based quotas, correct prefix-command filtering, specific-match priority, richer template variables, and persistent storage fallback.\n"
-            "• 💎 **Server Premium Reliability:** Consistent tier limits, expiry-aware checks, owner grant/revoke validation, and local entitlement fallback.\n"
-            "• 🎂 **Birthday Customization:** Automated birthday alerts and profiles, with separate editable normal-message and embed-card text (`/birthdaywish`).\n"
-            "• 👑 **Vanity Roles Engine:** Automatic role grants synced to custom status keyword triggers with slot tiers (`/vanity`, `n!vanity_add`).\n"
-            "• 🛡️ **Advanced Moderation & Logs:** Bans, kicks, mutes, tempbans, warnings, lockdowns, snipes, and audit log channels (`/ban`, `/mute`, `/serverlogs`).\n"
-            "• 🎲 **Social Games & Duels:** Tic-Tac-Toe, Rock-Paper-Scissors, Connect Four, Number Guess, Ship, and Would You Rather.\n"
-            "• 🧸 **13 Animated Action Commands:** Prefix-only expressions with anime reaction gifs (`n!pat`, `n!cuddle`, `n!hug`, `n!kiss`, `n!slap`, `n!punch`, etc.).\n"
-            "• 👑 **MongoDB Atlas Cloud Sync:** Cross-server persistence for premium, warnings, reminders, and confessions.\n"
-            "• ⚡ **Optimized Command Engine:** Hybrid prefix/slash commands with dynamic Help indexing for newly loaded commands."
+            "## ✨ What's New in v3.0.0-pro\n"
+            "• 📱 **Use Nexora Anywhere (DM & User App Support):** 33 curated fun, game, profile, and utility commands (`/avatar`, `/userinfo`, `/ship`, `/rps`, `/tictactoe`, `/connect4`, `/guess`, `/tod`, `/wyr`, `/meme`, `/calc`, `/remind`) now work in 1-on-1 DMs & Group DMs!\n"
+            "• 🎮 **Infinite Rematches & Reply Turn Pings:** Clicking **Rematch / Play Again** in `/rps`, `/tictactoe`, `/connect4`, and `/guess` spawns a brand-new match message so games never expire, and turn pings reply directly to the match board.\n"
+            "• 🎂 **00:00 Midnight Birthday Engine:** Announces birthdays right at `00:00` midnight in each server's local UTC timezone with interactive setup studio (`/introbdsetup`, `n!bdaysetup`), guaranteed pings, and 3-layer duplicate protection.\n"
+            "• 🎨 **Embed Studio + 1-Click JSON Import:** Build multi-embed announcements interactively or click **📋 Import JSON** inside `/embed_studio` to paste Discohook JSON directly.\n"
+            "• 💬 **Atmospheric Quote Cards (`/quote`):** High-res Pillow quote cards with custom/jumbo emoji rendering and 1-click **Apps ➔ Quote Message** support.\n"
+            "• 🎭 **720+ Curated Truth & Dare Prompts:** `/tod`, `/truth`, and `/dare` feature 720+ non-repeating prompts across `pg`, `teen`, and `spicy` tiers.\n"
+            "• 🤖 **Auto-Responders & Vanity Roles:** 10 free autoresponder slots per server (`/autoresponder`) plus automated status keyword roles (`/vanity`).\n"
+            "• ⚡ **Ultra-Fast RAM-Cached Engine:** Zero-blocking hot-path caching for AFK, Reminders, Quotes, Actions, and Game Stats, plus live hot-reloading (`n!owner`, `n!reload`)."
         )
         self.add_text(whats_new)
         self.add_separator()
@@ -2399,6 +2277,11 @@ class Help(commands.Cog):
 
         skip = {"h", "cmds", "commands"}
 
+        for canonical_name, data in list(COMMAND_DATA.items()):
+            for alias in (data.get("aliases") or []):
+                if alias not in skip and alias not in registry:
+                    registry[alias] = data
+
         for cmd in self.bot.commands:
             name = cmd.name
             if name in skip:
@@ -2409,10 +2292,7 @@ class Help(commands.Cog):
                 if alias in skip:
                     continue
                 if alias not in registry:
-                    stub = _make_stub(cmd)
-                    stub["name"] = alias
-                    stub["related"] = [name]
-                    registry[alias] = stub
+                    registry[alias] = registry[name]
 
         for cmd in self.bot.tree.walk_commands():
             name = cmd.name
