@@ -1958,10 +1958,24 @@ class BirthdayIntro(commands.Cog):
         return current
 
     def _has_sent_birthday_today(
-        self, sent_log: dict, guild_id: int, user_id: int, target_date: datetime.date
+        self,
+        sent_log: dict,
+        guild_id: int,
+        user_id: int,
+        target_date: datetime.date,
+        doc: Optional[dict] = None,
     ) -> bool:
+        date_str = target_date.isoformat()
         entry = sent_log.get(f"{guild_id}:{user_id}")
-        return isinstance(entry, dict) and entry.get("date") == target_date.isoformat()
+        if isinstance(entry, dict) and entry.get("date") == date_str:
+            return True
+        if isinstance(doc, dict):
+            by_guild = doc.get("sent_dates_by_guild")
+            if isinstance(by_guild, dict) and by_guild.get(str(guild_id)) == date_str:
+                return True
+            if int(doc.get("guild_id") or 0) == int(guild_id) and doc.get("last_notified_date") == date_str:
+                return True
+        return False
 
     def _record_birthday_sent(
         self, sent_log: dict, guild_id: int, user_id: int, now: datetime.datetime
@@ -1980,6 +1994,33 @@ class BirthdayIntro(commands.Cog):
                 "Birthday was announced to user %s in guild %s, but the send ledger could not be saved",
                 user_id, guild_id,
             )
+
+    async def _mark_birthday_sent(
+        self, sent_log: dict, guild_id: int, user_id: int, now: datetime.datetime
+    ):
+        """Record birthday sent in both local JSON ledger and MongoDB so container restarts never re-send."""
+        self._record_birthday_sent(sent_log, guild_id, user_id, now)
+        if self.col is not None:
+            date_str = now.date().isoformat()
+            try:
+                await self.col.update_many(
+                    {
+                        "$or": [
+                            {"_id": f"{guild_id}:{user_id}"},
+                            {"_id": int(user_id), "guild_id": int(guild_id)},
+                            {"user_id": int(user_id), "guild_id": int(guild_id)},
+                        ]
+                    },
+                    {
+                        "$set": {
+                            "last_notified_date": date_str,
+                            "last_notified_year": now.year,
+                            f"sent_dates_by_guild.{guild_id}": date_str,
+                        }
+                    },
+                )
+            except Exception as exc:
+                logger.debug("Could not persist birthday sent date to MongoDB: %s", exc)
 
     def _normalize_birthday_doc(self, doc: dict) -> Optional[dict]:
         if not isinstance(doc, dict):
@@ -2078,6 +2119,7 @@ class BirthdayIntro(commands.Cog):
     async def _process_birthdays(self):
         utc_now = datetime.datetime.now(datetime.timezone.utc)
         sent_log = self._load_birthday_sent_log(utc_now.date())
+        seen_pairs: Set[Tuple[int, int]] = set()
         stats = {
             "profiles": 0,
             "due_today": 0,
@@ -2092,6 +2134,12 @@ class BirthdayIntro(commands.Cog):
         async for doc in self.iter_birthdays():
             stats["profiles"] += 1
             guild_id = int(doc.get("guild_id") or 0)
+            uid = int(doc["_id"])
+            pair = (guild_id, uid)
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+
             settings = await self.get_settings(guild_id) if guild_id else {}
             offset_mins = int(settings.get("utc_offset_minutes", 0) or 0)
             server_now = get_server_now(offset_mins)
@@ -2101,7 +2149,7 @@ class BirthdayIntro(commands.Cog):
             stats["due_today"] += 1
 
             if self._has_sent_birthday_today(
-                sent_log, guild_id, doc["_id"], server_now.date()
+                sent_log, guild_id, uid, server_now.date(), doc=doc
             ):
                 stats["already_sent_today"] += 1
                 continue
@@ -2183,7 +2231,7 @@ class BirthdayIntro(commands.Cog):
                 )
                 continue
 
-            self._record_birthday_sent(sent_log, guild.id, doc["_id"], server_now)
+            await self._mark_birthday_sent(sent_log, guild.id, doc["_id"], server_now)
             stats["announced"] += 1
 
             # Cross-server mutual broadcast (Premium)
@@ -2201,7 +2249,7 @@ class BirthdayIntro(commands.Cog):
                     other_offset = int(other_settings.get("utc_offset_minutes", 0) or 0)
                     other_now = get_server_now(other_offset)
                     if self._has_sent_birthday_today(
-                        sent_log, other_guild.id, doc["_id"], other_now.date()
+                        sent_log, other_guild.id, doc["_id"], other_now.date(), doc=doc
                     ):
                         continue
                     other_channel_id = other_settings.get("announce_channel_id")
@@ -2228,14 +2276,14 @@ class BirthdayIntro(commands.Cog):
                             view=BirthdayAnnouncementView(self, uid=doc["_id"], guild_id=other_guild.id),
                             allowed_mentions=c_mentions,
                         )
-                        self._record_birthday_sent(sent_log, other_guild.id, doc["_id"], other_now)
+                        await self._mark_birthday_sent(sent_log, other_guild.id, doc["_id"], other_now)
                     except Exception as exc:
                         logger.warning(
                             "Cross-server birthday announcement failed for user %s in guild %s: %s",
                             doc["_id"], other_guild.id, exc,
                         )
 
-        if stats["due_today"] > 0 or stats["announced"] > 0:
+        if stats["announced"] > 0 or stats["failed_send"] > 0:
             logger.info(
                 "Birthday check summary: scanned=%(profiles)s, due_today=%(due_today)s, "
                 "already_sent_today=%(already_sent_today)s, announced=%(announced)s",

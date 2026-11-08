@@ -725,26 +725,26 @@ async def on_ready():
     C_BOLD = "\033[1m"
     C_RESET = "\033[0m"
 
-    banner = f"""
-{C_CYAN}{C_BOLD}  ███╗   ██╗███████╗██╗  ██╗ ██████╗ ██████╗  █████╗ 
-  ████╗  ██║██╔════╝╚██╗██╔╝██╔═══██╗██╔══██╗██╔══██╗
-  ██╔██╗ ██║█████╗   ╚███╔╝ ██║   ██║██████╔╝███████║
-  ██║╚██╗██║██╔══╝   ██╔██╗ ██║   ██║██╔══██╗██╔══██║
-  ██║ ╚████║███████╗██╔╝ ██╗╚██████╔╝██║  ██║██║  ██║
-  ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝{C_RESET}
-{C_MAGENTA}  ✦ Interactive Discord Framework · Components V2 Edition ✦{C_RESET}
-
-{C_BLUE}┌─────────────────────────────────────────────────────────────────────────────┐{C_RESET}
-{C_BLUE}│{C_RESET} {C_BOLD}🤖 Bot Instance:{C_RESET}  {C_GREEN}{bot.user}{C_RESET} ({bot.user.id if bot.user else 0})
-{C_BLUE}│{C_RESET} {C_BOLD}🌐 Distribution:{C_RESET}  {C_CYAN}{total_guilds:,}{C_RESET} Servers  •  {C_CYAN}{total_users:,}{C_RESET} Members  •  {C_CYAN}{total_channels:,}{C_RESET} Channels
-{C_BLUE}│{C_RESET} {C_BOLD}⚡ Performance:{C_RESET}   Ping: {C_GREEN}{ping_ms}ms{C_RESET}  •  Shards: {C_GREEN}{bot.shard_count or 1}{C_RESET}  •  Prefix: {C_YELLOW}{DEFAULT_PREFIX}{C_RESET}
-{C_BLUE}│{C_RESET} {C_BOLD}📦 Extensions:{C_RESET}    {C_GREEN}{len(bot.loaded_extensions)}/{len(EXTENSIONS)}{C_RESET} Modules Operational
-{C_BLUE}│{C_RESET} {C_BOLD}🍃 Database:{C_RESET}      {mongo_status}
-{C_BLUE}│{C_RESET} {C_BOLD}📡 Support Feed:{C_RESET}  {webhook_status}
-{C_BLUE}│{C_RESET} {C_BOLD}🐍 Runtime:{C_RESET}       Python {sys.version.split()[0]}  •  discord.py {discord.__version__}
-{C_BLUE}└─────────────────────────────────────────────────────────────────────────────┘{C_RESET}
-{C_GREEN}✔ Nexora system core initialized and awaiting interactions.{C_RESET}
-"""
+    banner = (
+        f"\n{C_CYAN}{C_BOLD}"
+        "  ███╗   ██╗███████╗██╗  ██╗ ██████╗ ██████╗  █████╗ \n"
+        "  ████╗  ██║██╔════╝╚██╗██╔╝██╔═══██╗██╔══██╗██╔══██╗\n"
+        "  ██╔██╗ ██║█████╗   ╚███╔╝ ██║   ██║██████╔╝███████║\n"
+        "  ██║╚██╗██║██╔══╝   ██╔██╗ ██║   ██║██╔══██╗██╔══██║\n"
+        "  ██║ ╚████║███████╗██╔╝ ██╗╚██████╔╝██║  ██║██║  ██║\n"
+        f"  ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝{C_RESET}\n"
+        f"{C_MAGENTA}  ✦ Interactive Discord Framework · Components V2 Edition ✦{C_RESET}\n\n"
+        f"{C_BLUE}┌─────────────────────────────────────────────────────────────────────────────┐{C_RESET}\n"
+        f"{C_BLUE}│{C_RESET} {C_BOLD}🤖 Bot Instance:{C_RESET}  {C_GREEN}{bot.user}{C_RESET} ({bot.user.id if bot.user else 0})\n"
+        f"{C_BLUE}│{C_RESET} {C_BOLD}🌐 Distribution:{C_RESET}  {C_CYAN}{total_guilds:,}{C_RESET} Servers  •  {C_CYAN}{total_users:,}{C_RESET} Members  •  {C_CYAN}{total_channels:,}{C_RESET} Channels\n"
+        f"{C_BLUE}│{C_RESET} {C_BOLD}⚡ Performance:{C_RESET}   Ping: {C_GREEN}{ping_ms}ms{C_RESET}  •  Shards: {C_GREEN}{bot.shard_count or 1}{C_RESET}  •  Prefix: {C_YELLOW}{DEFAULT_PREFIX}{C_RESET}\n"
+        f"{C_BLUE}│{C_RESET} {C_BOLD}📦 Extensions:{C_RESET}    {C_GREEN}{len(bot.loaded_extensions)}/{len(EXTENSIONS)}{C_RESET} Modules Operational\n"
+        f"{C_BLUE}│{C_RESET} {C_BOLD}🍃 Database:{C_RESET}      {mongo_status}\n"
+        f"{C_BLUE}│{C_RESET} {C_BOLD}📡 Support Feed:{C_RESET}  {webhook_status}\n"
+        f"{C_BLUE}│{C_RESET} {C_BOLD}🐍 Runtime:{C_RESET}       Python {sys.version.split()[0]}  •  discord.py {discord.__version__}\n"
+        f"{C_BLUE}└─────────────────────────────────────────────────────────────────────────────┘{C_RESET}\n"
+        f"{C_GREEN}✔ Nexora system core initialized and awaiting interactions.{C_RESET}\n"
+    )
     print(banner)
 
     # Dispatch Online notification to support webhook

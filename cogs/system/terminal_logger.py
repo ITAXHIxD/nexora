@@ -83,8 +83,21 @@ class TerminalBuffer:
 
     def push(self, line: str):
         clean = line.rstrip("\r\n")
-        if clean:
-            self._deque.append(clean)
+        if not clean:
+            return
+        # Never buffer Discord internal HTTP/rate-limit/gateway warnings to prevent feedback loops
+        if any(
+            ign in clean
+            for ign in (
+                "discord.http",
+                "We are being rate limited",
+                "discord.gateway",
+                "discord.client",
+                "discord.webhook",
+            )
+        ):
+            return
+        self._deque.append(clean)
 
     def pop_batch(self, max_lines: int = 40) -> list[str]:
         batch = []
@@ -271,58 +284,52 @@ class TerminalLogger(commands.Cog):
         return channel
 
     async def _flush_buffer_now(self):
-        """Immediately sends any queued terminal lines to the owner's terminal channel."""
+        """Sends at most 1 consolidated terminal message per cycle to prevent 429 rate limits."""
         if not self.is_enabled or len(self.buffer) == 0:
             return
         channel = await self.get_log_channel()
         if not channel:
             return
 
-        lines = self.buffer.pop_batch(max_lines=45)
-        if not lines:
-            return
-
-        chunks = []
         current_chunk = []
         current_len = 0
 
-        for line in lines:
-            formatted = format_ansi_terminal_line(line)
+        while self.buffer._deque and len(current_chunk) < 40:
+            raw_line = self.buffer._deque[0]
+            formatted = format_ansi_terminal_line(raw_line)
             if not formatted:
+                self.buffer._deque.popleft()
                 continue
             line_len = len(formatted) + 1
-            if current_len + line_len > 1850:
-                chunks.append("\n".join(current_chunk))
-                current_chunk = [formatted]
-                current_len = line_len
-            else:
-                current_chunk.append(formatted)
-                current_len += line_len
+            if current_len + line_len > 1850 and current_chunk:
+                break
+            self.buffer._deque.popleft()
+            current_chunk.append(formatted)
+            current_len += line_len
 
-        if current_chunk:
-            chunks.append("\n".join(current_chunk))
+        if not current_chunk:
+            return
 
+        chunk_str = "\n".join(current_chunk)[:1900]
         self._is_sending = True
         try:
-            for chunk in chunks[:3]:
-                await channel.send(f"```ansi\n{chunk}\n```")
-                await asyncio.sleep(0.35)
+            await channel.send(f"```ansi\n{chunk_str}\n```")
         except Exception:
             pass
         finally:
             self._is_sending = False
 
     async def _log_dispatch_loop(self):
-        """Dispatches batched terminal lines every 2 seconds to avoid rate limits."""
+        """Dispatches 1 batched terminal message every 5 seconds to stay well under Discord rate limits."""
         try:
             await self.bot.wait_until_ready()
         except RuntimeError:
             return
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(4.0)
 
         while not self.bot.is_closed():
             try:
-                await asyncio.sleep(2.0)
+                await asyncio.sleep(5.0)
                 if not self.is_enabled or len(self.buffer) == 0 or self._is_sending:
                     continue
                 await self._flush_buffer_now()
@@ -330,7 +337,7 @@ class TerminalLogger(commands.Cog):
                 break
             except Exception:
                 self._is_sending = False
-                await asyncio.sleep(4.0)
+                await asyncio.sleep(5.0)
 
     # ── Terminal Lifecycle & Change Listeners (NO command usage logging) ──────
 
