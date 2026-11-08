@@ -445,7 +445,44 @@ class CharacterBot(commands.Bot):
         else:
             logger.info("📦 Loaded all %d extensions successfully", len(self.loaded_extensions))
 
+        self.configure_user_app_contexts()
+
+    def configure_user_app_contexts(self):
+        """
+        Configure which slash commands are visible in DMs, Group DMs, and User-Installed Apps,
+        while strictly locking all server moderation & management commands to Servers only.
+        """
+        user_app_dm_commands = {
+            # Core & Help
+            "help", "status", "ping", "botinfo", "invite",
+            # Profile, Avatars & Media
+            "avatar", "banner", "randomavatar", "userinfo", "spotify",
+            # Ship & Duo
+            "ship", "shipstreak", "duochallenge",
+            # Fun, Party & Reddit
+            "tod", "truth", "dare", "wyr", "meme", "reddit",
+            "pp", "iq", "vibe", "fortune", "npc", "compliment",
+            # Mini-Games
+            "rps", "tictactoe", "connect4", "guess", "gamestats",
+            # Personal Utilities
+            "calc", "remind", "reminders",
+        }
+        dm_install = discord.app_commands.AppInstallationType(guild=True, user=True)
+        dm_context = discord.app_commands.AppCommandContext(guild=True, dm_channel=True, private_channel=True)
+
+        guild_only_install = discord.app_commands.AppInstallationType(guild=True, user=False)
+        guild_only_context = discord.app_commands.AppCommandContext(guild=True, dm_channel=False, private_channel=False)
+
+        for cmd in self.tree.get_commands():
+            if cmd.name in user_app_dm_commands:
+                cmd.allowed_installs = dm_install
+                cmd.allowed_contexts = dm_context
+            else:
+                cmd.allowed_installs = guild_only_install
+                cmd.allowed_contexts = guild_only_context
+
     async def _sync_app_commands(self):
+        self.configure_user_app_contexts()
         if not bot_settings.get("auto_sync_commands", True):
             logger.debug("Auto sync disabled in config.")
             return

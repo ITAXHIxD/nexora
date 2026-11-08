@@ -11,7 +11,7 @@ Supports dual MongoDB and local persistence, plus Admin Reset and Customization.
 
 import logging
 from datetime import datetime, timezone
-from typing import Optional, Literal
+from typing import Optional, Literal, Union
 
 import discord
 from discord import app_commands
@@ -50,8 +50,8 @@ class GameStats(commands.Cog):
         aliases=["game_stats", "leaderboard_games"],
         description="📊 View your lifetime mini-game statistics, win rates, and match records",
     )
-    @app_commands.describe(member="Member to inspect stats for (leave blank for yourself)")
-    async def gamestats(self, ctx: commands.Context, member: Optional[discord.Member] = None):
+    @app_commands.describe(member="User to inspect stats for (leave blank for yourself)")
+    async def gamestats(self, ctx: commands.Context, member: Optional[Union[discord.Member, discord.User]] = None):
         target = member or ctx.author
         doc = await get_user_stats(self.bot, target.id)
 

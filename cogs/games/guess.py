@@ -295,21 +295,31 @@ class GuessGameView(NexoraView):
             round_num=next_round,
             starting_player=next_starter,
         )
+        new_msg = None
         if interaction.channel:
-            ref = self.message.to_reference(fail_if_not_exists=False) if self.message else None
-            new_msg = await interaction.channel.send(
-                view=new_view,
-                reference=ref,
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+            try:
+                ref = self.message.to_reference(fail_if_not_exists=False) if self.message else None
+                new_msg = await interaction.channel.send(
+                    view=new_view,
+                    reference=ref,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except Exception:
+                new_msg = None
+        if new_msg is None:
+            try:
+                new_msg = await interaction.followup.send(view=new_view, wait=True)
+            except Exception:
+                pass
+        if new_msg:
             new_view.message = new_msg
 
-            if self.mode == "duel" and new_view.current_turn:
-                await new_view.send_turn_ping(
-                    interaction.channel,
-                    new_view.current_turn,
-                    f"🔄 **Rematch Round #{next_round}!** 🎯 **Your Chance:** {new_view.current_turn.mention} guesses first on the replied board!",
-                )
+        if self.mode == "duel" and new_view.current_turn and interaction.channel:
+            await new_view.send_turn_ping(
+                interaction.channel,
+                new_view.current_turn,
+                f"🔄 **Rematch Round #{next_round}!** 🎯 **Your Chance:** {new_view.current_turn.mention} guesses first on the replied board!",
+            )
 
     async def on_timeout(self):
         await self._clear_turn_ping()
@@ -337,11 +347,10 @@ class NumberGuess(commands.Cog):
             app_commands.Choice(name="🎉 Party Lobby (Free-for-all for entire channel)", value="party"),
         ]
     )
-    @commands.guild_only()
     async def guess(
         self,
         ctx: commands.Context,
-        opponent: Optional[discord.Member] = None,
+        opponent: Optional[Union[discord.Member, discord.User]] = None,
         mode: Optional[str] = "solo",
     ):
         chosen_mode = (mode or "solo").lower()

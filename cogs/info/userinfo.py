@@ -101,16 +101,18 @@ class UserInfoView(NexoraView):
 
         # ── Dates & Timestamps Block ──────────────────────────────────────────
         created_str = f"{ts_format(u.created_at, 'D')} ({ts_format(u.created_at, 'R')})"
-        joined_str = (
-            f"{ts_format(u.joined_at, 'D')} ({ts_format(u.joined_at, 'R')})"
-            if is_member and getattr(u, "joined_at", None)
-            else "Not in this server"
-        )
-        dates_block = (
-            "### 📅 Timeline\n"
-            f"• **Account Created:** {created_str}\n"
-            f"• **Joined Server:** {joined_str}"
-        )
+        if is_member and getattr(u, "joined_at", None):
+            dates_block = (
+                "### 📅 Timeline\n"
+                f"• **Account Created:** {created_str}\n"
+                f"• **Joined Server:** {ts_format(u.joined_at, 'D')} ({ts_format(u.joined_at, 'R')})"
+            )
+        else:
+            dates_block = (
+                "### 📅 Timeline\n"
+                f"• **Account Created:** {created_str}\n"
+                f"• **Context:** Global Discord Profile (DM / User App)"
+            )
         self.add_text(dates_block)
         self.add_separator(discord.SeparatorSpacing.small)
 
@@ -149,9 +151,12 @@ class UserInfoView(NexoraView):
                 f"• **Assigned Roles:**\n  {roles_str}"
             )
         else:
+            accent_hex = f"`#{u.accent_color.value:06X}`" if getattr(u, "accent_color", None) else "`Default`"
+            has_banner = "✅ Custom Banner" if getattr(u, "banner", None) else "None"
             roles_block = (
-                "### 🎭 Roles & Permissions\n"
-                "• *This user is not currently in this server.*"
+                "### 🌐 Global Discord Identity\n"
+                f"• **Display Name:** `{u.display_name}`\n"
+                f"• **Accent Theme:** {accent_hex} · **Banner:** {has_banner}"
             )
         self.add_text(roles_block)
 

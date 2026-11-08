@@ -943,31 +943,94 @@ class Ship(commands.Cog):
         return random.choice(pool).format(pct=pct)
 
     def _resolve(self, ctx: commands.Context, val: Optional[str]):
-        """(member | None, display_name | None)"""
-        if not val: return None, None
+        """(member_or_user | None, display_name | None)"""
+        if not val:
+            return None, None
         val = val.strip()
-        if val.lower() == "random": return None, "random"
-        # mention
+        if val.lower() == "random":
+            return None, "random"
+
+        # 1. Mention (<@123> or <@!123>) or numeric ID
         m = re.match(r"<@!?(\d+)>$", val)
-        if m:
-            mem = ctx.guild.get_member(int(m.group(1))) if ctx.guild else None
-            if mem: return mem, mem.display_name
-        # numeric id
-        if val.isdigit() and ctx.guild:
-            mem = ctx.guild.get_member(int(val))
-            if mem: return mem, mem.display_name
-        # name search
+        uid_int = int(m.group(1)) if m else (int(val) if val.isdigit() else None)
+        if uid_int is not None:
+            if ctx.guild:
+                mem = ctx.guild.get_member(uid_int)
+                if mem:
+                    return mem, mem.display_name
+            # Check Group DM recipients or 1-on-1 DM recipient
+            recipients = getattr(ctx.channel, "recipients", None)
+            if recipients:
+                for u in recipients:
+                    if u.id == uid_int:
+                        return u, u.display_name
+            recipient = getattr(ctx.channel, "recipient", None)
+            if recipient and recipient.id == uid_int:
+                return recipient, recipient.display_name
+            cached_u = self.bot.get_user(uid_int)
+            if cached_u:
+                return cached_u, cached_u.display_name
+
+        # 2. Name search across guild, Group DM, or bot cache
+        low = val.lower()
         if ctx.guild:
-            low = val.lower()
             for mem in ctx.guild.members:
                 if not mem.bot and (mem.display_name.lower() == low or mem.name.lower() == low):
                     return mem, mem.display_name
+        recipients = getattr(ctx.channel, "recipients", None)
+        if recipients:
+            for u in recipients:
+                if not u.bot and (u.display_name.lower() == low or u.name.lower() == low):
+                    return u, u.display_name
+        recipient = getattr(ctx.channel, "recipient", None)
+        if recipient and not recipient.bot and (recipient.display_name.lower() == low or recipient.name.lower() == low):
+            return recipient, recipient.display_name
+
         return None, val
 
+    async def _resolve_async(self, ctx: commands.Context, val: Optional[str]):
+        """Resolve member/user with REST API fallback for mentions/IDs in DMs & User Apps."""
+        mem, name = self._resolve(ctx, val)
+        if mem is not None or not val:
+            return mem, name
+        raw = val.strip()
+        m = re.match(r"<@!?(\d+)>$", raw)
+        uid_int = int(m.group(1)) if m else (int(raw) if raw.isdigit() else None)
+        if uid_int is not None:
+            try:
+                fetched = await self.bot.fetch_user(uid_int)
+                if fetched:
+                    return fetched, fetched.display_name
+            except Exception:
+                pass
+        return mem, name
+
     def _random_member(self, ctx, exclude=None):
-        if not ctx.guild: return None
-        pool = [m for m in ctx.guild.members if not m.bot and m != exclude]
-        return random.choice(pool) if pool else None
+        exclude_id = getattr(exclude, "id", None)
+        # 1. Server (Guild) members
+        if ctx.guild and ctx.guild.members:
+            pool = [m for m in ctx.guild.members if not m.bot and m.id != exclude_id]
+            if pool:
+                return random.choice(pool)
+
+        # 2. Group DM recipients (2 or more members in a group chat)
+        recipients = getattr(ctx.channel, "recipients", None)
+        if recipients:
+            pool = [u for u in recipients if not u.bot and u.id != exclude_id]
+            if pool:
+                return random.choice(pool)
+
+        # 3. 1-on-1 DM recipient (if chatting with another user via User App)
+        recipient = getattr(ctx.channel, "recipient", None)
+        if recipient and not recipient.bot and recipient.id != exclude_id:
+            return recipient
+
+        # 4. Fallback in DMs: pick a random human user from the bot's user cache
+        cached_pool = [u for u in getattr(self.bot, "users", []) if not u.bot and u.id != exclude_id]
+        if cached_pool:
+            return random.choice(cached_pool)
+
+        return None
 
     async def build_output(self, ctx, name1, name2, pct, m1, m2):
         tier_label, col_a, col_b, tier_desc = get_tier(pct)
@@ -1002,8 +1065,8 @@ class Ship(commands.Cog):
     async def ship(self, ctx: commands.Context, user1: Optional[str] = None, user2: Optional[str] = None):
         await ctx.defer()
 
-        m1, n1 = self._resolve(ctx, user1)
-        m2, n2 = self._resolve(ctx, user2)
+        m1, n1 = await self._resolve_async(ctx, user1)
+        m2, n2 = await self._resolve_async(ctx, user2)
 
         # ── Normalise cases ───────────────────────────────────────────────────
         # No args → ship author with random
@@ -1163,8 +1226,8 @@ class Ship(commands.Cog):
         user1: Optional[str] = None,
         user2: Optional[str] = None,
     ):
-        m1, n1 = self._resolve(ctx, user1)
-        m2, n2 = self._resolve(ctx, user2)
+        m1, n1 = await self._resolve_async(ctx, user1)
+        m2, n2 = await self._resolve_async(ctx, user2)
 
         # Same friendly resolution rules as /ship, but this feature is explicitly
         # relationship-neutral: friends, siblings, partners, teammates, etc.

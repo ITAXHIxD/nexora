@@ -12,7 +12,7 @@ import asyncio
 import logging
 import random
 import re
-from typing import Optional
+from typing import Optional, Union
 
 import discord
 from discord import app_commands
@@ -699,7 +699,7 @@ class TruthOrDare(commands.Cog):
         description="🎭 18+ Truth or Dare: deeper confessions, bold dares, and party duels",
     )
     @app_commands.describe(
-        target="Member to challenge (leave empty to play yourself)",
+        target="User to challenge (leave empty to play yourself)",
         rating="Content tier: pg, teen, or spicy (default: teen)",
     )
     @app_commands.choices(
@@ -709,11 +709,10 @@ class TruthOrDare(commands.Cog):
             app_commands.Choice(name="🔴 Spicy · 18+ (Bold & Flirty)", value="spicy"),
         ]
     )
-    @commands.guild_only()
     async def tod(
         self,
         ctx: commands.Context,
-        target: Optional[discord.Member] = None,
+        target: Optional[Union[discord.Member, discord.User]] = None,
         rating: Optional[str] = "teen",
     ):
         await self._launch_game(ctx, target, rating, None)
@@ -727,7 +726,7 @@ class TruthOrDare(commands.Cog):
         description="💬 Get a tough 18+ Truth or challenge a friend",
     )
     @app_commands.describe(
-        target="Member to challenge (leave empty to play yourself)",
+        target="User to challenge (leave empty to play yourself)",
         rating="Content tier: pg, teen, or spicy (default: teen)",
     )
     @app_commands.choices(
@@ -737,11 +736,10 @@ class TruthOrDare(commands.Cog):
             app_commands.Choice(name="🔴 Spicy · 18+ (Bold Truths)", value="spicy"),
         ]
     )
-    @commands.guild_only()
     async def truth(
         self,
         ctx: commands.Context,
-        target: Optional[discord.Member] = None,
+        target: Optional[Union[discord.Member, discord.User]] = None,
         rating: Optional[str] = "teen",
     ):
         await self._launch_game(ctx, target, rating, "Truth")
@@ -755,7 +753,7 @@ class TruthOrDare(commands.Cog):
         description="⚡ Roll a bold 18+ Dare or challenge a friend",
     )
     @app_commands.describe(
-        target="Member to challenge (leave empty to play yourself)",
+        target="User to challenge (leave empty to play yourself)",
         rating="Content tier: pg, teen, or spicy (default: teen)",
     )
     @app_commands.choices(
@@ -765,11 +763,10 @@ class TruthOrDare(commands.Cog):
             app_commands.Choice(name="🔴 Unhinged Mode (Bold & Flirty)", value="spicy"),
         ]
     )
-    @commands.guild_only()
     async def dare(
         self,
         ctx: commands.Context,
-        target: Optional[discord.Member] = None,
+        target: Optional[Union[discord.Member, discord.User]] = None,
         rating: Optional[str] = "teen",
     ):
         await self._launch_game(ctx, target, rating, "Dare")

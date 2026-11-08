@@ -455,23 +455,33 @@ class Connect4View(NexoraView):
             round_num=next_round,
             starting_turn=next_turn,
         )
+        new_msg = None
         if interaction.channel:
-            ref = self.message.to_reference(fail_if_not_exists=False) if self.message else None
-            new_msg = await interaction.channel.send(
-                view=new_view,
-                reference=ref,
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+            try:
+                ref = self.message.to_reference(fail_if_not_exists=False) if self.message else None
+                new_msg = await interaction.channel.send(
+                    view=new_view,
+                    reference=ref,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except Exception:
+                new_msg = None
+        if new_msg is None:
+            try:
+                new_msg = await interaction.followup.send(view=new_view, wait=True)
+            except Exception:
+                pass
+        if new_msg:
             new_view.message = new_msg
 
-            if not self.is_solo:
-                starter = self.player_r if next_turn == "R" else self.player_y
-                chip_badge = "🔴 Red" if next_turn == "R" else "🟡 Yellow"
-                await new_view.send_turn_ping(
-                    interaction.channel,
-                    starter,
-                    f"🔄 **Rematch Round #{next_round}!** 🎯 **Your Chance:** {starter.mention} drops first ({chip_badge}) on the replied board!",
-                )
+        if not self.is_solo and interaction.channel:
+            starter = self.player_r if next_turn == "R" else self.player_y
+            chip_badge = "🔴 Red" if next_turn == "R" else "🟡 Yellow"
+            await new_view.send_turn_ping(
+                interaction.channel,
+                starter,
+                f"🔄 **Rematch Round #{next_round}!** 🎯 **Your Chance:** {starter.mention} drops first ({chip_badge}) on the replied board!",
+            )
 
     async def on_timeout(self):
         await self._clear_turn_ping()
@@ -504,11 +514,10 @@ class Connect4(commands.Cog):
             app_commands.Choice(name="🔴 Hard (Tactical)", value="hard"),
         ]
     )
-    @commands.guild_only()
     async def connect4(
         self,
         ctx: commands.Context,
-        opponent: Optional[discord.Member] = None,
+        opponent: Optional[Union[discord.Member, discord.User]] = None,
         difficulty: Optional[str] = "medium",
     ):
         diff_clean = (difficulty or "medium").lower()

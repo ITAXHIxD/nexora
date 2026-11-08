@@ -12,7 +12,7 @@ Supports:
 
 import logging
 import random
-from typing import Optional
+from typing import Optional, Union
 
 import discord
 from discord import app_commands
@@ -217,13 +217,23 @@ class SoloRPSView(NexoraView):
             best_streak=self.best_streak,
             round_num=self.round_num + 1,
         )
+        new_msg = None
         if interaction.channel:
-            ref = self.message.to_reference(fail_if_not_exists=False) if self.message else None
-            new_msg = await interaction.channel.send(
-                view=new_view,
-                reference=ref,
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+            try:
+                ref = self.message.to_reference(fail_if_not_exists=False) if self.message else None
+                new_msg = await interaction.channel.send(
+                    view=new_view,
+                    reference=ref,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except Exception:
+                new_msg = None
+        if new_msg is None:
+            try:
+                new_msg = await interaction.followup.send(view=new_view, wait=True)
+            except Exception:
+                pass
+        if new_msg:
             new_view.message = new_msg
 
 
@@ -435,14 +445,25 @@ class DuelRPSView(NexoraView):
             session_scores=dict(self.scores),
             round_num=self.round_num + 1,
         )
+        new_msg = None
         if interaction.channel:
-            ref = self.message.to_reference(fail_if_not_exists=False) if self.message else None
-            new_msg = await interaction.channel.send(
-                view=new_view,
-                reference=ref,
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+            try:
+                ref = self.message.to_reference(fail_if_not_exists=False) if self.message else None
+                new_msg = await interaction.channel.send(
+                    view=new_view,
+                    reference=ref,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except Exception:
+                new_msg = None
+        if new_msg is None:
+            try:
+                new_msg = await interaction.followup.send(view=new_view, wait=True)
+            except Exception:
+                pass
+        if new_msg:
             new_view.message = new_msg
+        if interaction.channel:
             other = self.player2 if interaction.user.id == self.player1.id else self.player1
             await new_view.send_turn_ping(
                 interaction.channel,
@@ -465,9 +486,8 @@ class RockPaperScissors(commands.Cog):
         name="rps",
         description="🎮 Play Rock-Paper-Scissors solo vs Nexora or challenge a friend",
     )
-    @app_commands.describe(opponent="Member to duel against (leave blank to play against bot)")
-    @commands.guild_only()
-    async def rps(self, ctx: commands.Context, opponent: Optional[discord.Member] = None):
+    @app_commands.describe(opponent="User to duel against (leave blank to play against bot)")
+    async def rps(self, ctx: commands.Context, opponent: Optional[Union[discord.Member, discord.User]] = None):
         if opponent and opponent != ctx.author and not opponent.bot:
             view = DuelRPSView(self.bot, ctx.author, opponent)
             msg = await send_view(ctx, view)

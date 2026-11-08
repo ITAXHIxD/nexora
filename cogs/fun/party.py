@@ -906,7 +906,7 @@ class Party(commands.Cog):
 
     @commands.hybrid_command(name="pp", description="Completely random fake measurement scanner 💀")
     @app_commands.describe(user="The user to measure (defaults to yourself)")
-    async def pp(self, ctx: commands.Context, user: Optional[discord.Member] = None):
+    async def pp(self, ctx: commands.Context, user: Optional[Union[discord.Member, discord.User]] = None):
         """Perform a completely random, hilarious fake measurement."""
         target = user or ctx.author
         view = PPView(bot=self.bot, requester=ctx.author, target=target)
@@ -916,7 +916,7 @@ class Party(commands.Cog):
 
     @commands.hybrid_command(name="iq", description="Neural diagnostic: Random IQ score & hilarious evaluation")
     @app_commands.describe(user="The user to evaluate (defaults to yourself)")
-    async def iq(self, ctx: commands.Context, user: Optional[discord.Member] = None):
+    async def iq(self, ctx: commands.Context, user: Optional[Union[discord.Member, discord.User]] = None):
         """Random IQ generator with brain tiers and diagnostic stats."""
         target = user or ctx.author
         view = IQView(bot=self.bot, requester=ctx.author, target=target)
@@ -926,7 +926,7 @@ class Party(commands.Cog):
 
     @commands.hybrid_command(name="vibe", description="Daily solo vibe check or Duo compatibility dynamic")
     @app_commands.describe(user="Optional user: check your duo vibe compatibility, or check solo vibe")
-    async def vibe(self, ctx: commands.Context, user: Optional[discord.Member] = None):
+    async def vibe(self, ctx: commands.Context, user: Optional[Union[discord.Member, discord.User]] = None):
         """Vibe check solo or duo chemistry with a friend."""
         target = user or ctx.author
         view = VibeView(bot=self.bot, requester=ctx.author, target=target)
@@ -936,7 +936,7 @@ class Party(commands.Cog):
 
     @commands.hybrid_command(name="fortune", description="Reveals an ominous, hilarious, and cursed fortune")
     @app_commands.describe(user="Optional user to consult the cursed prophecy for")
-    async def fortune(self, ctx: commands.Context, user: Optional[discord.Member] = None):
+    async def fortune(self, ctx: commands.Context, user: Optional[Union[discord.Member, discord.User]] = None):
         """Draw a cursed prophecy card from the crystal ball."""
         target = user or ctx.author
         view = FortuneView(bot=self.bot, requester=ctx.author, target=target)
@@ -953,7 +953,7 @@ class Party(commands.Cog):
         self,
         ctx: commands.Context,
         message: Optional[str] = None,
-        user: Optional[discord.Member] = None,
+        user: Optional[Union[discord.Member, discord.User]] = None,
     ):
         """Transform into an interactive RPG NPC with dialogue choices and quests."""
         target = user or ctx.author
@@ -964,7 +964,7 @@ class Party(commands.Cog):
 
     @commands.hybrid_command(name="compliment", description="Send a wholesome, heartwarming compliment to someone")
     @app_commands.describe(user="The user to compliment (defaults to yourself)")
-    async def compliment(self, ctx: commands.Context, user: Optional[discord.Member] = None):
+    async def compliment(self, ctx: commands.Context, user: Optional[Union[discord.Member, discord.User]] = None):
         """Send a random, beautifully formatted wholesome compliment."""
         target = user or ctx.author
         view = ComplimentView(bot=self.bot, requester=ctx.author, target=target)

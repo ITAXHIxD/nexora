@@ -411,7 +411,6 @@ class Meme(commands.Cog):
             app_commands.Choice(name="📈 Rising (Gaining Momentum)", value="rising"),
         ]
     )
-    @commands.guild_only()
     async def reddit(
         self,
         ctx: commands.Context,
@@ -458,7 +457,6 @@ class Meme(commands.Cog):
             app_commands.Choice(name="🚿 Shower Thoughts (r/showerthoughts)", value="showerthoughts"),
         ]
     )
-    @commands.guild_only()
     async def meme(self, ctx: commands.Context, category: Optional[str] = "memes"):
         selected_cat = (category or "memes").lower()
         sub = SUBREDDIT_CATEGORIES.get(selected_cat, selected_cat)

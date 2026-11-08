@@ -77,6 +77,8 @@ class OwnerControlPanelView(discord.ui.View):
     async def btn_sync_global(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
+            if hasattr(self.bot, "configure_user_app_contexts"):
+                self.bot.configure_user_app_contexts()
             synced = await self.bot.tree.sync()
             await interaction.followup.send(f"✅ Synced **{len(synced)}** slash commands globally.", ephemeral=True)
         except Exception as e:
@@ -126,6 +128,8 @@ class Owner(commands.Cog):
                 ok += 1
             except Exception as e:
                 failed.append((ext, str(e)))
+        if hasattr(self.bot, "configure_user_app_contexts"):
+            self.bot.configure_user_app_contexts()
         logger.info("[CHANGE] 🔄 Reloaded %d/%d extensions", ok, len(exts))
         return ok, failed
 
@@ -208,6 +212,8 @@ class Owner(commands.Cog):
     @is_owner()
     async def force_resync(self, ctx: commands.Context):
         try:
+            if hasattr(self.bot, "configure_user_app_contexts"):
+                self.bot.configure_user_app_contexts()
             guild_synced = await self.bot.tree.sync(guild=ctx.guild) if ctx.guild else []
             global_synced = await self.bot.tree.sync()
 
@@ -250,6 +256,8 @@ class Owner(commands.Cog):
     @is_owner()
     async def sync(self, ctx: commands.Context, guild_id: Optional[str] = None):
         try:
+            if hasattr(self.bot, "configure_user_app_contexts"):
+                self.bot.configure_user_app_contexts()
             if guild_id:
                 gid = int(ctx.guild.id) if guild_id.lower() in ("here", "guild", ".") and ctx.guild else int(guild_id)
                 guild_obj = discord.Object(id=gid)
@@ -289,6 +297,8 @@ class Owner(commands.Cog):
         resolved = self._resolve_extension_name(extension)
         try:
             await self.bot.reload_extension(resolved)
+            if hasattr(self.bot, "configure_user_app_contexts"):
+                self.bot.configure_user_app_contexts()
             logger.info("[CHANGE] 🔄 Reloaded extension '%s' (by %s)", resolved, ctx.author)
             await ctx.send(f"🔄 Reloaded `{resolved}` successfully.")
         except Exception as e:

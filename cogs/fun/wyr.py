@@ -268,7 +268,6 @@ class WouldYouRather(commands.Cog):
         aliases=["wouldyourather"],
         description="🤔 Interactive Would You Rather dilemma with live community voting",
     )
-    @commands.guild_only()
     async def wyr(self, ctx: commands.Context):
         view = WYRView(self.bot, ctx.author)
         await send_view(ctx, view)
