@@ -778,7 +778,7 @@ async def on_ready():
         "  ██║╚██╗██║██╔══╝   ██╔██╗ ██║   ██║██╔══██╗██╔══██║\n"
         "  ██║ ╚████║███████╗██╔╝ ██╗╚██████╔╝██║  ██║██║  ██║\n"
         f"  ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝{C_RESET}\n"
-        f"{C_MAGENTA}  ✦ Interactive Discord Framework · v3.0.0-pro · Components V2 Edition ✦{C_RESET}\n\n"
+        f"{C_MAGENTA}  ✦ Interactive Discord Framework · v3.5.0-pro · Components V2 Edition ✦{C_RESET}\n\n"
         f"{C_BLUE}┌─────────────────────────────────────────────────────────────────────────────┐{C_RESET}\n"
         f"{C_BLUE}│{C_RESET} {C_BOLD}🤖 Bot Instance:{C_RESET}  {C_GREEN}{bot.user}{C_RESET} ({bot.user.id if bot.user else 0})\n"
         f"{C_BLUE}│{C_RESET} {C_BOLD}🌐 Distribution:{C_RESET}  {C_CYAN}{total_guilds:,}{C_RESET} Servers  •  {C_CYAN}{total_users:,}{C_RESET} Members  •  {C_CYAN}{total_channels:,}{C_RESET} Channels\n"

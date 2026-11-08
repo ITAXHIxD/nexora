@@ -78,7 +78,7 @@ class BotInfoView(NexoraView):
 
         # ── Header Section ────────────────────────────────────────────────────
         header_text = (
-            "# 🤖 Nexora Core · `v3.0.0-pro` Diagnostics\n"
+            "# 🤖 Nexora Core · `v3.5.0-pro` Diagnostics\n"
             "> High-performance multi-purpose Discord system · Built with Components V2 & User App DM Support"
         )
         self.add_section(header_text, thumbnail_url=avatar_url)

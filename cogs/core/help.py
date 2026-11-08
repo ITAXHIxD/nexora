@@ -1907,7 +1907,7 @@ class HelpMainView(HelpLayoutView):
         total_unique = len(canonical_cmds)
 
         header = (
-            "# 🌌 Nexora Help Center · `v3.0.0-pro`\n"
+            "# 🌌 Nexora Help Center · `v3.5.0-pro`\n"
             "> High-performance multi-purpose Discord bot with MongoDB persistence, User App DM support & Components V2 UI.\n\n"
             f"**Prefix:** `{p}` or `{p.swapcase()}`  ·  **Slash:** `/`  ·  📚 **{total_unique}** unique commands\n"
             f"**Quick Jump:** `{p}help <command>` or `/help <command>`"
@@ -1916,7 +1916,7 @@ class HelpMainView(HelpLayoutView):
         self.add_separator()
 
         whats_new = (
-            "## ✨ What's New in v3.0.0-pro\n"
+            "## ✨ What's New in v3.5.0-pro\n"
             "• 📱 **Use Nexora Anywhere (DM & User App Support):** 33 curated fun, game, profile, and utility commands (`/avatar`, `/userinfo`, `/ship`, `/rps`, `/tictactoe`, `/connect4`, `/guess`, `/tod`, `/wyr`, `/meme`, `/calc`, `/remind`) now work in 1-on-1 DMs & Group DMs!\n"
             "• 🎮 **Infinite Rematches & Reply Turn Pings:** Clicking **Rematch / Play Again** in `/rps`, `/tictactoe`, `/connect4`, and `/guess` spawns a brand-new match message so games never expire, and turn pings reply directly to the match board.\n"
             "• 🎂 **00:00 Midnight Birthday Engine:** Announces birthdays right at `00:00` midnight in each server's local UTC timezone with interactive setup studio (`/introbdsetup`, `n!bdaysetup`), guaranteed pings, and 3-layer duplicate protection.\n"
