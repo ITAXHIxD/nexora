@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -169,7 +170,7 @@ class StealLayoutView(NexoraView):
     async def _on_emoji(self, interaction: discord.Interaction):
         async def create(inter, name):
             try:
-                data = compress_emoji(self.image)
+                data = await asyncio.to_thread(compress_emoji, self.image)
                 emoji = await self.ctx.guild.create_custom_emoji(
                     name=name,
                     image=data,
@@ -192,7 +193,7 @@ class StealLayoutView(NexoraView):
 
         async def create(inter, name, desc, emoji):
             try:
-                data = prepare_sticker(self.image)
+                data = await asyncio.to_thread(prepare_sticker, self.image)
                 file = discord.File(BytesIO(data), filename="sticker.png")
 
                 sticker = await self.ctx.guild.create_sticker(
@@ -229,8 +230,13 @@ class Steal(commands.Cog):
             await self.session.close()
 
     async def fetch(self, url: str) -> Optional[bytes]:
+        session = getattr(self.bot, "session", None)
+        if session is None or session.closed:
+            if self.session is None or self.session.closed:
+                self.session = aiohttp.ClientSession()
+            session = self.session
         try:
-            async with self.session.get(url) as r:
+            async with session.get(url) as r:
                 if r.status == 200:
                     return await r.read()
         except Exception as e:
@@ -288,14 +294,41 @@ class Steal(commands.Cog):
                         pass
 
         # -------- ATTACHMENT --------
-        if not url and ctx.message.attachments:
+        if not url and ctx.message and ctx.message.attachments:
             att = ctx.message.attachments[0]
-            if att.content_type and att.content_type.startswith("image/"):
+            if (att.content_type and att.content_type.startswith("image/")) or att.filename.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
                 url = att.url
                 name = att.filename.split(".")[0]
+                animated = att.filename.lower().endswith(".gif")
+
+        # -------- REPLIED MESSAGE SUPPORT --------
+        if not url and ctx.message and ctx.message.reference and ctx.message.reference.message_id:
+            ref_msg = getattr(ctx.message.reference, "resolved", None)
+            if not isinstance(ref_msg, discord.Message):
+                try:
+                    ref_msg = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+                except Exception:
+                    ref_msg = None
+            if isinstance(ref_msg, discord.Message):
+                if ref_msg.stickers:
+                    stk = ref_msg.stickers[0]
+                    url = stk.url
+                    name = stk.name
+                    animated = url.lower().endswith(".gif")
+                elif ref_msg.content:
+                    parsed = self.parse_emojis(ref_msg.content)
+                    if parsed:
+                        url = parsed[0]["url"]
+                        name = parsed[0]["name"]
+                        animated = parsed[0]["animated"]
+                if not url and ref_msg.attachments:
+                    att = ref_msg.attachments[0]
+                    url = att.url
+                    name = att.filename.split(".")[0]
+                    animated = att.filename.lower().endswith(".gif")
 
         if not url:
-            return await ctx.send("❌ No emoji or image found.")
+            return await ctx.send("❌ Provide a custom emoji, image URL, attachment, or reply to a message containing an emoji/sticker!")
 
         data = await self.fetch(url)
         if not data:

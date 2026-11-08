@@ -16,7 +16,7 @@ Supports:
 import asyncio
 import logging
 import random
-from typing import Optional, List, Tuple, Set
+from typing import Optional, List, Tuple, Set, Union
 
 import discord
 from discord import app_commands

@@ -109,61 +109,78 @@ def save_local_quotes_data(data: Dict[str, Any]) -> None:
 
 
 class QuoteStorage:
-    """Manages persistence for quote server settings."""
+    """Manages persistence for quote server settings with an in-memory cache."""
 
     def __init__(self, bot):
         self.bot = bot
+        self._settings_cache: Dict[int, GuildQuoteSettings] = {}
 
     def _get_settings_col(self):
         db = getattr(self.bot, "mongo_db", None)
         return db["quote_settings"] if db is not None else None
 
     async def get_settings(self, guild_id: int) -> GuildQuoteSettings:
-        """Fetch guild settings with Mongo first, falling back to local JSON."""
+        """Fetch guild settings with RAM cache first, Mongo second, falling back to local JSON."""
+        gid = int(guild_id)
+        if gid in self._settings_cache:
+            return self._settings_cache[gid]
+
         col = self._get_settings_col()
         if col is not None:
             try:
-                doc = await col.find_one({"_id": int(guild_id)})
+                doc = await col.find_one({"_id": gid})
                 if isinstance(doc, dict):
-                    return GuildQuoteSettings.from_dict(doc.get("settings", {}), guild_id=guild_id)
+                    settings = GuildQuoteSettings.from_dict(doc.get("settings", {}), guild_id=gid)
+                    self._settings_cache[gid] = settings
+                    return settings
             except Exception as exc:
-                logger.warning("Quote Mongo settings read failed for guild %s: %s", guild_id, exc)
+                logger.warning("Quote Mongo settings read failed for guild %s: %s", gid, exc)
 
         local_data = load_local_quotes_data()
-        raw_settings = local_data.get("guild_settings", {}).get(str(guild_id))
+        raw_settings = local_data.get("guild_settings", {}).get(str(gid))
         if isinstance(raw_settings, dict):
-            return GuildQuoteSettings.from_dict(raw_settings, guild_id=guild_id)
+            settings = GuildQuoteSettings.from_dict(raw_settings, guild_id=gid)
+            self._settings_cache[gid] = settings
+            return settings
 
-        return GuildQuoteSettings(guild_id=guild_id)
+        settings = GuildQuoteSettings(guild_id=gid)
+        self._settings_cache[gid] = settings
+        return settings
 
     async def save_settings(self, guild_id: int, settings: GuildQuoteSettings) -> None:
-        """Save guild quote settings to Mongo and mirror locally."""
+        """Save guild quote settings to RAM cache, Mongo, and mirror locally."""
+        gid = int(guild_id)
+        self._settings_cache[gid] = settings
         payload = settings.to_dict()
         col = self._get_settings_col()
         if col is not None:
             try:
                 await col.update_one(
-                    {"_id": int(guild_id)},
+                    {"_id": gid},
                     {"$set": {"settings": payload, "updated_at": datetime.now(timezone.utc).isoformat()}},
                     upsert=True,
                 )
             except Exception as exc:
-                logger.error("Quote Mongo settings save failed for guild %s: %s", guild_id, exc)
+                logger.error("Quote Mongo settings save failed for guild %s: %s", gid, exc)
 
         try:
             local_data = load_local_quotes_data()
-            local_data.setdefault("guild_settings", {})[str(guild_id)] = payload
+            local_data.setdefault("guild_settings", {})[str(gid)] = payload
             save_local_quotes_data(local_data)
         except Exception as exc:
-            logger.error("Quote local settings save failed for guild %s: %s", guild_id, exc)
+            logger.error("Quote local settings save failed for guild %s: %s", gid, exc)
 
     async def increment_quote_count(self, guild_id: int) -> None:
         """Atomically increment the quote usage counter for a guild."""
+        gid = int(guild_id)
+        if gid in self._settings_cache:
+            self._settings_cache[gid].quotes_count += 1
+
         col = self._get_settings_col()
         if col is not None:
             try:
                 await col.update_one(
-                    {"_id": int(guild_id)},
+                    {"_id": gid},
                     {"$inc": {"settings.quotes_count": 1}},
                     upsert=True,
                 )
@@ -172,7 +189,7 @@ class QuoteStorage:
 
         try:
             local_data = load_local_quotes_data()
-            g_entry = local_data.setdefault("guild_settings", {}).setdefault(str(guild_id), {})
+            g_entry = local_data.setdefault("guild_settings", {}).setdefault(str(gid), {})
             g_entry["quotes_count"] = int(g_entry.get("quotes_count", 0)) + 1
             save_local_quotes_data(local_data)
         except Exception as exc:

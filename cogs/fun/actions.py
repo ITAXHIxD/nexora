@@ -95,20 +95,29 @@ STYLE_PRESETS = {
 }
 
 
+_GIF_CACHE: dict[str, List[str]] = {}
+
+
 def load_gif_list(action_key: str) -> List[str]:
-    """Load GIF list from a specific JSON file."""
+    """Load GIF list from a specific JSON file with O(1) in-memory caching."""
+    if action_key in _GIF_CACHE:
+        return _GIF_CACHE[action_key]
+
     file_path = os.path.join(GIF_FOLDER, f"{action_key}.json")
 
     if not os.path.exists(file_path):
         logger.warning("No GIF file for action '%s': %s", action_key, file_path)
+        _GIF_CACHE[action_key] = []
         return []
 
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
             if isinstance(data, list):
+                _GIF_CACHE[action_key] = data
                 return data
             logger.warning("GIF file for '%s' is not a list.", action_key)
+            _GIF_CACHE[action_key] = []
             return []
     except Exception as e:
         logger.error("Failed to read %s: %s", file_path, e)
@@ -179,13 +188,35 @@ class ActionLayoutView(NexoraView):
             return_btn = discord.ui.Button(
                 label=f"{self.label} Back!",
                 emoji=self.emoji,
-                style=discord.ButtonStyle.secondary,
+                style=discord.ButtonStyle.primary,
             )
             return_btn.callback = self._on_return_action
             row.add_item(return_btn)
 
+        again_btn = discord.ui.Button(
+            label="New GIF",
+            emoji="🔄",
+            style=discord.ButtonStyle.secondary,
+        )
+        again_btn.callback = self._on_shuffle_gif
+        row.add_item(again_btn)
+
         row.add_item(DismissButton(user_id=self.author.id))
         self.container.add_item(row)
+
+    async def _on_shuffle_gif(self, interaction: discord.Interaction):
+        allowed_ids = {self.author.id} | {t.id for t in self.targets}
+        if interaction.user.id not in allowed_ids:
+            return await interaction.response.send_message(
+                "❌ Only participants in this action card can shuffle the GIF!",
+                ephemeral=True,
+            )
+        gifs = load_gif_list(self.action_key)
+        candidates = [g for g in gifs if g != self.gif_url] or gifs
+        if candidates:
+            self.gif_url = random.choice(candidates)
+            self._build()
+        await interaction.response.edit_message(view=self)
 
     async def _on_return_action(self, interaction: discord.Interaction):
         target_ids = [t.id for t in self.targets]

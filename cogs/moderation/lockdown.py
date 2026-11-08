@@ -178,6 +178,7 @@ class Lockdown(commands.Cog):
             return await ctx.send("❌ Discord slowmode cannot exceed **6 hours (21600s)**.", ephemeral=True)
 
         audit_reason = f"[Slowmode by {ctx.author}]"
+        dur_display = "Off (0s)" if seconds == 0 else f"{clean_dur} ({seconds}s)"
         await target_channel.edit(slowmode_delay=seconds, reason=audit_reason)
 
         view = NexoraView(color=BRAND_COLOR if seconds > 0 else SUCCESS_COLOR, timeout=120)

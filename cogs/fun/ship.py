@@ -12,6 +12,8 @@ Enhanced ship command with:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
+import asyncio
+import functools
 import hashlib
 import io
 import logging
@@ -329,6 +331,7 @@ def hex_col(rgb): return "#{:02x}{:02x}{:02x}".format(*rgb)
 
 # ── Font ───────────────────────────────────────────────────────────────────────
 
+@functools.lru_cache(maxsize=32)
 def get_font(size: int) -> ImageFont.FreeTypeFont:
     font_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../DejaVuSans-Bold.ttf"))
     try:    return ImageFont.truetype(font_path, size)
@@ -419,23 +422,44 @@ def text_avatar(text: str, size: int = 200) -> Image.Image:
 
 # ── Avatar download ────────────────────────────────────────────────────────────
 
-async def fetch_avatar(url: str) -> Optional[Image.Image]:
+_SHARED_SHIP_SESSION: Optional[aiohttp.ClientSession] = None
+
+async def _fetch_member_avatar(member) -> Optional[Image.Image]:
+    if member is None:
+        return None
     try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(str(url), timeout=aiohttp.ClientTimeout(total=8)) as r:
-                if r.status == 200:
-                    return Image.open(io.BytesIO(await r.read())).convert("RGBA")
+        if hasattr(member, "display_avatar") and hasattr(member.display_avatar, "read"):
+            raw = await member.display_avatar.read()
+            if raw:
+                return Image.open(io.BytesIO(raw)).convert("RGBA")
+    except Exception:
+        pass
+    if hasattr(member, "display_avatar"):
+        return await fetch_avatar(str(member.display_avatar.url))
+    return None
+
+async def fetch_avatar(url: str) -> Optional[Image.Image]:
+    global _SHARED_SHIP_SESSION
+    try:
+        if _SHARED_SHIP_SESSION is None or _SHARED_SHIP_SESSION.closed:
+            _SHARED_SHIP_SESSION = aiohttp.ClientSession()
+        async with _SHARED_SHIP_SESSION.get(str(url), timeout=aiohttp.ClientTimeout(total=6)) as r:
+            if r.status == 200:
+                return Image.open(io.BytesIO(await r.read())).convert("RGBA")
     except Exception as e:
         logger.warning("Avatar download failed: %s", e)
     return None
 
 # ── Main image builder ─────────────────────────────────────────────────────────
 
-async def build_ship_image(
-    name1: str, name2: str,
+def _render_ship_card_sync(
+    name1: str,
+    name2: str,
     pct: int,
-    col_a: tuple, col_b: tuple,
-    member1=None, member2=None,
+    col_a: tuple,
+    col_b: tuple,
+    av1: Optional[Image.Image],
+    av2: Optional[Image.Image],
 ) -> io.BytesIO:
     W, H = 960, 380
     AVATAR_SIZE = 160
@@ -444,7 +468,6 @@ async def build_ship_image(
     base = Image.new("RGBA", (W, H))
     bg   = ImageDraw.Draw(base)
 
-    # deep background — darkened mix of both tier colours
     dark_a = tuple(max(0, c - 80) for c in col_a)
     dark_b = tuple(max(0, c - 80) for c in col_b)
     for y in range(H):
@@ -468,22 +491,15 @@ async def build_ship_image(
     # ── Glow layer ─────────────────────────────────────────────────────────────
     glow = Image.new("RGBA", (W,H), (0,0,0,0))
     gd   = ImageDraw.Draw(glow)
-    # centre heart glow
     for radius in range(80, 20, -10):
         a = int(80 * (1 - radius/80) * (pct/100))
         gd.ellipse([W//2-radius, H//2-radius, W//2+radius, H//2+radius], fill=lerp_color(col_a,col_b,0.5)+(a,))
     base = Image.alpha_composite(base, glow)
 
-    draw = ImageDraw.Draw(base)
-
     # ── Avatars ────────────────────────────────────────────────────────────────
-    # Left avatar
-    av1 = await fetch_avatar(member1.display_avatar.url) if member1 else None
     if av1 is None: av1 = text_avatar(name1, AVATAR_SIZE)
     circ1 = make_circle(av1, AVATAR_SIZE)
 
-    # Right avatar
-    av2 = await fetch_avatar(member2.display_avatar.url) if member2 else None
     if av2 is None: av2 = text_avatar(name2, AVATAR_SIZE)
     circ2 = make_circle(av2, AVATAR_SIZE)
 
@@ -497,7 +513,6 @@ async def build_ship_image(
         av_draw.ellipse([cx1-radius, cy1-radius, cx1+radius, cy1+radius], fill=col_a+(min(a,255),))
         av_draw.ellipse([cx2-radius, cy2-radius, cx2+radius, cy2+radius], fill=col_b+(min(a,255),))
     base = Image.alpha_composite(base, av_layer)
-    draw = ImageDraw.Draw(base)
 
     # White border ring
     border_size = AVATAR_SIZE + 8
@@ -513,11 +528,9 @@ async def build_ship_image(
     # ── Heart ─────────────────────────────────────────────────────────────────
     heart_size = 3 + int(pct * 0.12)
     heart_col  = lerp_color(col_a, col_b, 0.5)
-    # outer glow heart
     draw_heart_poly(draw, W//2, H//2 - 10, heart_size+4, (255,255,255), alpha=30)
     draw_heart_poly(draw, W//2, H//2 - 10, heart_size,   heart_col,     alpha=230)
 
-    # corner accent stars (only on high %)
     if pct >= 70:
         for sx, sy in [(60,30),(W-60,30),(60,H-30),(W-60,H-30)]:
             draw_star(draw, sx, sy, 8, (255,255,255), alpha=int(pct*2))
@@ -525,7 +538,6 @@ async def build_ship_image(
     # ── Percentage text ────────────────────────────────────────────────────────
     f_huge = get_font(88)
     f_med  = get_font(28)
-    f_sm   = get_font(20)
     f_xs   = get_font(16)
 
     pct_txt = f"{pct}%"
@@ -556,15 +568,28 @@ async def build_ship_image(
     base = Image.alpha_composite(base, bar_layer)
     draw = ImageDraw.Draw(base)
 
-    # bar labels
     bb = draw.textbbox((0,0), "0%",   font=f_xs); draw.text((bar_x - bb[2]-4,       bar_y-1), "0%",   font=f_xs, fill=(200,200,200,160))
     bb = draw.textbbox((0,0), "100%", font=f_xs); draw.text((bar_x+bar_w+4,          bar_y-1), "100%", font=f_xs, fill=(200,200,200,160))
 
-    # ── Output ─────────────────────────────────────────────────────────────────
     buf = io.BytesIO()
-    base.convert("RGB").save(buf, format="PNG", optimize=True)
+    base.convert("RGB").save(buf, format="PNG", compress_level=1)
     buf.seek(0)
     return buf
+
+
+async def build_ship_image(
+    name1: str, name2: str,
+    pct: int,
+    col_a: tuple, col_b: tuple,
+    member1=None, member2=None,
+) -> io.BytesIO:
+    av1, av2 = await asyncio.gather(
+        _fetch_member_avatar(member1),
+        _fetch_member_avatar(member2),
+    )
+    return await asyncio.to_thread(
+        _render_ship_card_sync, name1, name2, pct, col_a, col_b, av1, av2
+    )
 
 # ── Modern Components V2 View ────────────────────────────────────────────────
 
@@ -669,16 +694,23 @@ class ShipView(discord.ui.LayoutView):
             emoji="🔗",
             style=discord.ButtonStyle.secondary,
         )
+        self.challenge_button = discord.ui.Button(
+            label="Duo Challenge",
+            emoji="🎯",
+            style=discord.ButtonStyle.success,
+        )
 
         self.reaction_button.callback = self._react
         self.why_button.callback = self._why
         self.reroll_button.callback = self._reroll
         self.share_button.callback = self._share
+        self.challenge_button.callback = self._duo_challenge
 
         self.actions = discord.ui.ActionRow(
             self.reaction_button,
             self.why_button,
             self.reroll_button,
+            self.challenge_button,
             self.share_button,
         )
         self.container.add_item(self.actions)
@@ -788,6 +820,15 @@ class ShipView(discord.ui.LayoutView):
                 f"Ship name: **{discord.utils.escape_markdown(self.cog.ship_name(self.name1, self.name2))}**\n"
                 f"🔗 Run `/ship {discord.utils.escape_markdown(self.name1)} {discord.utils.escape_markdown(self.name2)}` to view the original result."
             ),
+            ephemeral=False,
+        )
+
+    async def _duo_challenge(self, interaction: discord.Interaction):
+        title, prompt = random.choice(DUO_CHALLENGES)
+        await interaction.response.send_message(
+            f"## {title} — Duo Challenge for {discord.utils.escape_markdown(self.name1)} & {discord.utils.escape_markdown(self.name2)}!\n"
+            f"> {prompt}\n\n"
+            f"-# 💘 Ship Score: **{self.pct}%** · Click **🎯 Duo Challenge** again for another challenge!",
             ephemeral=False,
         )
 

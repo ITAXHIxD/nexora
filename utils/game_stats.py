@@ -34,19 +34,31 @@ DEFAULT_USER_STATS = {
 }
 
 
+_LOCAL_STATS_CACHE: Optional[Dict[str, Any]] = None
+
+
 def _load_local_stats() -> Dict[str, Any]:
-    """Load local JSON stats file."""
+    """Load local JSON stats file with in-memory caching."""
+    global _LOCAL_STATS_CACHE
+    if _LOCAL_STATS_CACHE is not None:
+        return _LOCAL_STATS_CACHE
     try:
         if os.path.exists(STATS_FILE):
             with open(STATS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                if isinstance(data, dict):
+                    _LOCAL_STATS_CACHE = data
+                    return _LOCAL_STATS_CACHE
     except Exception as e:
         logger.warning("GameStats: Error reading %s: %s", STATS_FILE, e)
-    return {}
+    _LOCAL_STATS_CACHE = {}
+    return _LOCAL_STATS_CACHE
 
 
 def _save_local_stats(data: Dict[str, Any]):
-    """Persist stats to local JSON file safely."""
+    """Persist stats to local JSON file safely and update RAM cache."""
+    global _LOCAL_STATS_CACHE
+    _LOCAL_STATS_CACHE = data
     try:
         os.makedirs("data", exist_ok=True)
         with open(STATS_FILE, "w", encoding="utf-8") as f:

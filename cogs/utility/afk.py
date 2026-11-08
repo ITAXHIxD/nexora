@@ -564,6 +564,10 @@ class AFK(commands.Cog):
         if message.author.bot or not message.guild:
             return
 
+        # O(1) fast-path exit: if no users are AFK anywhere, skip all parsing & lookups
+        if not self.active_afk_cache and not self.local_cache:
+            return
+
         now_ts = time.time()
         now_dt = datetime.datetime.now(datetime.timezone.utc)
 
@@ -651,16 +655,12 @@ class AFK(commands.Cog):
         if not targets_to_check:
             return
 
-        # Filter against active AFK cache or local cache
+        # Filter against O(1) active AFK memory cache (no per-message MongoDB round-trips)
         afk_mentioned_users: list[discord.Member | discord.User] = []
         for m in targets_to_check:
             uid = int(m.id)
             if uid in self.active_afk_cache or uid in self.local_cache:
                 afk_mentioned_users.append(m)
-            elif self.col is not None:
-                doc = await self.get_afk(uid)
-                if doc:
-                    afk_mentioned_users.append(m)
 
         if not afk_mentioned_users:
             return

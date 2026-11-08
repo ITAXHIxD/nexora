@@ -2,11 +2,11 @@
 cogs/utility/remind.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Interactive Components V2 Smart Reminder Engine
-Persistent reminders backed by MongoDB with background async worker.
+Persistent reminders backed by MongoDB + O(1) in-memory cache with
+interactive 1-click cancellation controls.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
-import asyncio
 import datetime
 import logging
 import secrets
@@ -31,17 +31,78 @@ from utils.ui import (
 logger = logging.getLogger(__name__)
 
 
-class RemindersListView(NexoraView):
-    """Components V2 view displaying active reminders for a user."""
+class ReminderCreatedView(NexoraView):
+    """Components V2 card shown when a reminder is created, with a 1-click Cancel button."""
 
     def __init__(
         self,
-        bot: commands.Bot,
+        cog: "Remind",
+        user_id: int,
+        rid: str,
+        dur_str: str,
+        due_at: datetime.datetime,
+        reason: str,
+        timeout: float = 180,
+    ):
+        super().__init__(bot=cog.bot, user_id=user_id, color=SUCCESS_COLOR, timeout=timeout)
+        self.cog = cog
+        self.rid = rid
+        self.dur_str = dur_str
+        self.due_at = due_at
+        self.reason = reason
+        self._cancelled = False
+        self._build()
+
+    def _build(self):
+        self.clear_container()
+        if self._cancelled:
+            self.add_section(
+                f"# 🗑️ Reminder Cancelled · `#{self.rid}`\n"
+                f"> Your scheduled reminder has been cancelled."
+            )
+            self.add_footer("Nexora Reminders")
+            self.add_row(DismissButton(user_id=self.user_id))
+            return
+
+        self.add_section(
+            f"# ⏰ Reminder Scheduled · `#{self.rid}`\n"
+            f"> I will remind you in **{self.dur_str}** ({ts_format(self.due_at, 'R')}).\n\n"
+            f"• **Note:** {self.reason}\n"
+            f"• **Due:** {ts_format(self.due_at, 'F')}"
+        )
+        self.add_footer(f"Nexora Reminders · Click 'Cancel Reminder' below or use n!delreminder {self.rid}")
+
+        btn_cancel = discord.ui.Button(
+            label="Cancel Reminder",
+            emoji="🗑️",
+            style=discord.ButtonStyle.danger,
+        )
+        btn_cancel.callback = self._on_cancel
+        self.add_row(btn_cancel, DismissButton(user_id=self.user_id))
+
+    async def _on_cancel(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message(
+                "❌ Only the person who set this reminder can cancel it.", ephemeral=True
+            )
+        await self.cog.delete_reminder(self.user_id, self.rid)
+        self._cancelled = True
+        self._build()
+        await interaction.response.edit_message(view=self)
+
+
+class RemindersListView(NexoraView):
+    """Components V2 view displaying active reminders for a user with interactive cancellation."""
+
+    def __init__(
+        self,
+        cog: "Remind",
         reminders: list[dict],
         requester: discord.abc.User,
         timeout: float = 180,
     ):
-        super().__init__(bot=bot, user_id=requester.id, color=BRAND_COLOR, timeout=timeout)
+        super().__init__(bot=cog.bot, user_id=requester.id, color=BRAND_COLOR, timeout=timeout)
+        self.cog = cog
         self.reminders = reminders
         self.requester = requester
         self._build()
@@ -60,13 +121,14 @@ class RemindersListView(NexoraView):
         header = (
             f"# ⏰ Your Scheduled Reminders\n"
             f"> Active Reminders: **{len(self.reminders)}**\n"
-            f"-# You can cancel any reminder with `/delreminder <id>`"
+            f"-# Select a reminder from the menu below to cancel it instantly"
         )
         self.add_section(header, thumbnail_url=str(self.requester.display_avatar.url))
         self.add_separator(discord.SeparatorSpacing.small)
 
         lines = []
-        for r in self.reminders:
+        options = []
+        for r in self.reminders[:10]:
             rid = r.get("id", "N/A")
             due_dt = datetime.datetime.fromisoformat(r["due_at"])
             due_str = f"{ts_format(due_dt, 'R')} ({ts_format(due_dt, 't')})"
@@ -74,18 +136,48 @@ class RemindersListView(NexoraView):
             jump = r.get("jump_url")
             jump_str = f" · [Jump]({jump})" if jump else ""
             lines.append(f"• **`#{rid}`** · Due {due_str}{jump_str}\n  > {reason}")
+            options.append(
+                discord.SelectOption(
+                    label=f"Cancel #{rid}",
+                    value=str(rid),
+                    description=reason[:95],
+                    emoji="🗑️",
+                )
+            )
 
-        self.add_text("\n\n".join(lines[:10]))
-        if len(lines) > 10:
-            self.add_footer(f"(+{len(lines) - 10} more reminders) · Requested by {self.requester.display_name}")
+        self.add_text("\n\n".join(lines))
+        if len(self.reminders) > 10:
+            self.add_footer(f"(+{len(self.reminders) - 10} more reminders) · Requested by {self.requester.display_name}")
         else:
             self.add_footer(f"Requested by {self.requester.display_name}")
+
+        if options:
+            select = discord.ui.Select(
+                placeholder="🗑️ Select a reminder to cancel…",
+                options=options[:25],
+                min_values=1,
+                max_values=1,
+            )
+
+            async def _on_select(interaction: discord.Interaction):
+                if interaction.user.id != self.requester.id:
+                    return await interaction.response.send_message(
+                        "❌ Only the owner of these reminders can cancel them.", ephemeral=True
+                    )
+                chosen_id = select.values[0]
+                await self.cog.delete_reminder(self.requester.id, chosen_id)
+                self.reminders = [r for r in self.reminders if r.get("id") != chosen_id]
+                self._build()
+                await interaction.response.edit_message(view=self)
+
+            select.callback = _on_select
+            self.add_row(select)
 
         self.add_row(DismissButton(user_id=self.requester.id))
 
 
 class Remind(commands.Cog):
-    """Smart persistent reminder system."""
+    """Smart persistent reminder system with O(1) in-memory scheduling cache."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -97,14 +189,18 @@ class Remind(commands.Cog):
         mongo = getattr(self.bot, "mongo_db", None)
         if mongo is not None:
             self.col = mongo["reminders"]
-            logger.info("Remind ready — MongoDB collection 'reminders'")
+            try:
+                self.local_reminders = [doc async for doc in self.col.find({})]
+                logger.info("Remind ready — Cached %d reminders from MongoDB", len(self.local_reminders))
+            except Exception as e:
+                logger.warning("Remind: Could not pre-load reminders from MongoDB: %s", e)
         else:
             logger.warning("Remind: MongoDB not available, running in-memory fallback")
 
     def cog_unload(self):
         self.check_reminders_task.cancel()
 
-    # ── Database Operations ───────────────────────────────────────────────────
+    # ── Database Operations (O(1) Memory Cached) ──────────────────────────────
 
     async def add_reminder(
         self,
@@ -128,60 +224,52 @@ class Remind(commands.Cog):
             "due_at": due_at.isoformat(),
         }
 
+        self.local_reminders.append(doc)
         if self.col is not None:
             try:
-                await self.col.insert_one(doc)
+                await self.col.insert_one(dict(doc))
             except Exception as e:
                 logger.warning("Remind: Mongo insert error: %s", e)
 
-        self.local_reminders.append(doc)
         return rid
 
     async def get_user_reminders(self, user_id: int) -> list[dict]:
-        if self.col is not None:
-            try:
-                cursor = self.col.find({"user_id": user_id}).sort("due_at", 1)
-                return [doc async for doc in cursor]
-            except Exception as e:
-                logger.warning("Remind: Mongo fetch error: %s", e)
-
-        return [r for r in self.local_reminders if r["user_id"] == user_id]
+        user_rems = [r for r in self.local_reminders if r.get("user_id") == user_id]
+        user_rems.sort(key=lambda r: r.get("due_at", ""))
+        return user_rems
 
     async def delete_reminder(self, user_id: int, rid: str) -> bool:
         rid_clean = rid.strip().replace("#", "").upper()
         deleted = False
 
-        if self.col is not None:
-            try:
-                res = await self.col.delete_one({"user_id": user_id, "id": rid_clean})
-                deleted = res.deleted_count > 0
-            except Exception as e:
-                logger.warning("Remind: Mongo delete error: %s", e)
-
         orig_len = len(self.local_reminders)
-        self.local_reminders = [r for r in self.local_reminders if not (r["user_id"] == user_id and r["id"] == rid_clean)]
+        self.local_reminders = [
+            r for r in self.local_reminders if not (r.get("user_id") == user_id and r.get("id") == rid_clean)
+        ]
         if len(self.local_reminders) < orig_len:
             deleted = True
 
+        if self.col is not None:
+            try:
+                res = await self.col.delete_one({"user_id": user_id, "id": rid_clean})
+                if res.deleted_count > 0:
+                    deleted = True
+            except Exception as e:
+                logger.warning("Remind: Mongo delete error: %s", e)
+
         return deleted
 
-    # ── Background Task ───────────────────────────────────────────────────────
+    # ── Background Task (Zero Idle MongoDB Queries) ───────────────────────────
 
     @tasks.loop(seconds=10)
     async def check_reminders_task(self):
+        if not self.local_reminders:
+            return
+
         now_dt = datetime.datetime.now(datetime.timezone.utc)
         now_iso = now_dt.isoformat()
 
-        due_docs = []
-        if self.col is not None:
-            try:
-                cursor = self.col.find({"due_at": {"$lte": now_iso}})
-                due_docs = [doc async for doc in cursor]
-            except Exception as e:
-                logger.warning("Remind: Mongo query due error: %s", e)
-        else:
-            due_docs = [r for r in self.local_reminders if r["due_at"] <= now_iso]
-
+        due_docs = [r for r in self.local_reminders if r.get("due_at", "") <= now_iso]
         if not due_docs:
             return
 
@@ -194,13 +282,13 @@ class Remind(commands.Cog):
             time_ago = fmt_duration(now_dt - created_dt)
             jump_url = doc.get("jump_url")
 
-            # Remove from DB / memory
+            # Remove from memory & DB
+            self.local_reminders = [r for r in self.local_reminders if r.get("id") != rid]
             if self.col is not None:
                 try:
                     await self.col.delete_one({"id": rid})
                 except Exception:
                     pass
-            self.local_reminders = [r for r in self.local_reminders if r.get("id") != rid]
 
             # Deliver notification
             user = self.bot.get_user(user_id)
@@ -221,7 +309,14 @@ class Remind(commands.Cog):
 
             row_items = []
             if jump_url:
-                row_items.append(discord.ui.Button(label="Jump to Message", url=jump_url, style=discord.ButtonStyle.link, emoji="🔗"))
+                row_items.append(
+                    discord.ui.Button(
+                        label="Jump to Message",
+                        url=jump_url,
+                        style=discord.ButtonStyle.link,
+                        emoji="🔗",
+                    )
+                )
             row_items.append(DismissButton(user_id=user.id))
             dm_view.add_row(*row_items)
 
@@ -284,7 +379,7 @@ class Remind(commands.Cog):
         if len(existing) >= max_reminders:
             return await ctx.send(
                 f"❌ **Reminder Limit Reached**: You currently have `{len(existing)}/{max_reminders}` scheduled reminders.\n"
-                f"{'Use `/delreminder <id>` to free up a slot.' if is_vip else '⭐ Upgrade to **Nexora VIP** (`/premium_price`) to unlock up to **50** reminders!'}",
+                f"{'Use `/reminders` to cancel one.' if is_vip else '⭐ Upgrade to **Nexora VIP** (`/premium_price`) to unlock up to **50** reminders!'}",
                 ephemeral=True,
             )
 
@@ -301,16 +396,7 @@ class Remind(commands.Cog):
             jump_url=jump_url,
         )
 
-        view = NexoraView(color=SUCCESS_COLOR, timeout=120)
-        view.add_section(
-            f"# ⏰ Reminder Scheduled · `#{rid}`\n"
-            f"> I will remind you in **{dur_str}** ({ts_format(due_at, 'R')}).\n\n"
-            f"• **Note:** {reason.strip()}\n"
-            f"• **Due:** {ts_format(due_at, 'F')}"
-        )
-        view.add_footer(f"Nexora Reminders · Cancel anytime with /delreminder {rid}")
-        view.add_row(DismissButton(user_id=ctx.author.id))
-
+        view = ReminderCreatedView(self, ctx.author.id, rid, dur_str, due_at, reason.strip())
         await send_view(ctx, view)
         logger.info("Remind: %s set reminder #%s for %s", ctx.author, rid, dur_str)
 
@@ -337,11 +423,11 @@ class Remind(commands.Cog):
 
     @commands.hybrid_command(
         name="reminders",
-        description="📋 View your scheduled active reminders",
+        description="📋 View and manage your scheduled active reminders",
     )
     async def reminders(self, ctx: commands.Context):
         user_rems = await self.get_user_reminders(ctx.author.id)
-        view = RemindersListView(self.bot, user_rems, ctx.author)
+        view = RemindersListView(self, user_rems, ctx.author)
         await send_view(ctx, view)
 
     @commands.command(

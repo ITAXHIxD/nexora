@@ -502,6 +502,20 @@ class Quote(commands.Cog):
         # ── LAYOUT ROUTING ──────────────────────────────────────────────────
         clean_text_only = strip_urls_from_text(content)
 
+        # Helper to reuse bot.session or fall back to temporary ClientSession
+        async def _download_url_bytes(url: str, timeout_sec: float = 4.0) -> Optional[bytes]:
+            session = getattr(self.bot, "session", None)
+            if session and not session.closed:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout_sec)) as resp:
+                    if resp.status == 200:
+                        return await resp.read()
+                return None
+            async with aiohttp.ClientSession() as temp_session:
+                async with temp_session.get(url, timeout=aiohttp.ClientTimeout(total=timeout_sec)) as resp:
+                    if resp.status == 200:
+                        return await resp.read()
+            return None
+
         # If no file attachment and no text/emoji content, check if message is a standalone GIF/image embed or sticker
         linked_image_url = None
         if image_attachment is None and not clean_text_only and getattr(source_message, "embeds", None):
@@ -513,13 +527,11 @@ class Quote(commands.Cog):
                         linked_image_url = target_url
                         if settings.render_style == "card":
                             try:
-                                async with aiohttp.ClientSession() as session:
-                                    async with session.get(target_url, timeout=aiohttp.ClientTimeout(total=4.0)) as resp:
-                                        if resp.status == 200:
-                                            img_bytes = await resp.read()
-                                            card_buf = await asyncio.to_thread(compose_image_quote, img_bytes)
-                                            if card_buf:
-                                                quote_file = discord.File(card_buf, filename="quote.png")
+                                img_bytes = await _download_url_bytes(target_url, 4.0)
+                                if img_bytes:
+                                    card_buf = await asyncio.to_thread(compose_image_quote, img_bytes)
+                                    if card_buf:
+                                        quote_file = discord.File(card_buf, filename="quote.png")
                             except Exception as e:
                                 logger.debug("Failed to compose embedded link image: %s", e)
                         break
@@ -534,13 +546,11 @@ class Quote(commands.Cog):
                     linked_image_url = sticker_url
                     if settings.render_style == "card":
                         try:
-                            async with aiohttp.ClientSession() as session:
-                                async with session.get(sticker_url, timeout=aiohttp.ClientTimeout(total=4.0)) as resp:
-                                    if resp.status == 200:
-                                        img_bytes = await resp.read()
-                                        card_buf = await asyncio.to_thread(compose_image_quote, img_bytes)
-                                        if card_buf:
-                                            quote_file = discord.File(card_buf, filename="quote.png")
+                            img_bytes = await _download_url_bytes(sticker_url, 4.0)
+                            if img_bytes:
+                                card_buf = await asyncio.to_thread(compose_image_quote, img_bytes)
+                                if card_buf:
+                                    quote_file = discord.File(card_buf, filename="quote.png")
                         except Exception as e:
                             logger.debug("Failed to compose sticker image: %s", e)
                 if not linked_image_url and not content:
@@ -603,24 +613,24 @@ class Quote(commands.Cog):
             except Exception as e:
                 logger.debug("Failed to read author avatar bytes: %s", e)
 
-            # Resolve Discord custom emojis (<:name:id> or <a:name:id>)
+            # Resolve Discord custom emojis (<:name:id> or <a:name:id>) concurrently
             emoji_ids = list({m.group(3) for m in CUSTOM_EMOJI_RE.finditer(content)})
             custom_emojis: Dict[str, bytes] = {}
             if emoji_ids:
-                async with aiohttp.ClientSession() as session:
-                    for eid in emoji_ids:
-                        if eid in _EMOJI_CACHE:
-                            custom_emojis[eid] = _EMOJI_CACHE[eid]
-                            continue
-                        try:
-                            url = f"https://cdn.discordapp.com/emojis/{eid}.png?size=96&quality=lossless"
-                            async with session.get(url, timeout=aiohttp.ClientTimeout(total=3.0)) as resp:
-                                if resp.status == 200:
-                                    data = await resp.read()
-                                    _EMOJI_CACHE[eid] = data
-                                    custom_emojis[eid] = data
-                        except Exception as e:
-                            logger.debug("Failed to fetch custom emoji %s: %s", eid, e)
+                async def _fetch_single_emoji(eid: str):
+                    if eid in _EMOJI_CACHE:
+                        custom_emojis[eid] = _EMOJI_CACHE[eid]
+                        return
+                    try:
+                        url = f"https://cdn.discordapp.com/emojis/{eid}.png?size=96&quality=lossless"
+                        data = await _download_url_bytes(url, 3.0)
+                        if data:
+                            _EMOJI_CACHE[eid] = data
+                            custom_emojis[eid] = data
+                    except Exception as e:
+                        logger.debug("Failed to fetch custom emoji %s: %s", eid, e)
+
+                await asyncio.gather(*(_fetch_single_emoji(eid) for eid in emoji_ids))
 
             try:
                 card_buf = await asyncio.to_thread(
