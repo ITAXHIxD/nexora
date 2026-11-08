@@ -494,7 +494,24 @@ class EmbedStudio(commands.Cog):
                 except Exception as e:
                     return await ctx.send(f"❌ Failed to read JSON attachment: `{e}`", ephemeral=True)
 
-        # 2. If JSON was provided, parse and launch preview immediately
+        # 2. If json_code is a URL (e.g. pastebin, raw github, hastebin), fetch it
+        if json_code and json_code.strip().startswith(("http://", "https://")):
+            url = json_code.strip()
+            session = getattr(self.bot, "session", None)
+            try:
+                if session and not session.closed:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=8.0)) as resp:
+                        if resp.status == 200:
+                            json_code = await resp.text()
+                else:
+                    async with aiohttp.ClientSession() as temp_sess:
+                        async with temp_sess.get(url, timeout=aiohttp.ClientTimeout(total=8.0)) as resp:
+                            if resp.status == 200:
+                                json_code = await resp.text()
+            except Exception as e:
+                logger.debug("Failed to fetch JSON from URL: %s", e)
+
+        # 3. If JSON was provided, parse and launch preview immediately
         if json_code:
             try:
                 content, embeds = parse_discohook_json(json_code)
@@ -559,7 +576,10 @@ class EmbedStudio(commands.Cog):
                 f"{target_str}\n\n"
                 "**Choose a workflow below:**\n"
                 "🎨 **Visual Composer** — Interactive form for Title, Description, Hex Color, Banner Image, and Footer.\n"
-                "📋 **Import Discohook JSON** — Paste raw JSON (multi-line or single-line) from Discohook or any embed generator."
+                "📋 **Import Discohook JSON** — Paste raw JSON directly into the modal.\n\n"
+                "💡 **Pro-Tip for Large / Multi-Embed JSON:**\n"
+                "• Upload your `.json` file with `n!embed_studio` (attach file)!\n"
+                "• Or pass a direct raw JSON URL: `/embed_studio json_code:<url>`"
             ),
             color=BRAND_COLOR,
         )
