@@ -463,6 +463,7 @@ class HelpSystem(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.data_path = self.get_data_path()
+        self._settings_cache = {}
     
     def get_data_path(self):
         """Get path for guild settings data"""
@@ -477,16 +478,20 @@ class HelpSystem(commands.Cog):
         return data_dir
     
     def load_guild_settings(self, guild_id):
-        """Load guild-specific guidelines settings"""
+        """Load guild-specific guidelines settings with O(1) memory cache"""
+        if guild_id in self._settings_cache:
+            return self._settings_cache[guild_id]
         try:
             file_path = os.path.join(self.data_path, f"{guild_id}_guidelines.json")
             if os.path.exists(file_path):
                 with open(file_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    self._settings_cache[guild_id] = data
+                    return data
         except Exception as e:
             logger.error(f"Error loading guild settings for {guild_id}: {e}")
         
-        return {
+        default = {
             'enabled': False,
             'channel_type': None,
             'channel_id': None,
@@ -499,9 +504,12 @@ class HelpSystem(commands.Cog):
             'last_sent': None,
             'sent_users': []
         }
+        self._settings_cache[guild_id] = default
+        return default
     
     def save_guild_settings(self, guild_id, settings):
         """Save guild-specific guidelines settings"""
+        self._settings_cache[guild_id] = settings
         try:
             file_path = os.path.join(self.data_path, f"{guild_id}_guidelines.json")
             with open(file_path, "w", encoding="utf-8") as f:

@@ -430,18 +430,20 @@ class AutoResponder(commands.Cog):
         if message.author.bot or not message.guild or message.webhook_id:
             return
 
-        # Skip if message invokes a valid bot command
-        try:
-            ctx = await self.bot.get_context(message)
-            if ctx.valid:
-                return
-        except Exception:
-            pass
-
-        # Evaluate against memory cache (zero DB operations)
+        # Evaluate against memory cache FIRST (zero DB/context operations)
         settings, items = await self._get_guild_cached(message.guild.id)
         if not settings.enabled or not items or not message.content.strip():
             return
+
+        # Skip if message invokes a valid bot command
+        content_lower = message.content.lstrip().lower()
+        if content_lower.startswith(("n!", "<@")):
+            try:
+                ctx = await self.bot.get_context(message)
+                if ctx.valid:
+                    return
+            except Exception:
+                pass
 
         member_roles = (
             {r.id for r in message.author.roles}

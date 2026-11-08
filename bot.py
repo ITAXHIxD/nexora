@@ -520,14 +520,23 @@ class CharacterBot(commands.Bot):
             logger.error("Error reading premium storage: %s", e)
 
     def load_premium_tiers(self):
-        pass
-
-    def get_tier_config(self, tier: str) -> dict:
-        t = str(tier or "FREE").strip().upper()
+        self._premium_tiers_cache = {}
         try:
             with open("config/premium_config.json", "r", encoding="utf-8") as f:
                 cfg = json.load(f)
-                return cfg.get("premium_tiers", {}).get(t, {})
+                self._premium_tiers_cache = cfg.get("premium_tiers", {})
+        except Exception:
+            self._premium_tiers_cache = {}
+
+    def get_tier_config(self, tier: str) -> dict:
+        t = str(tier or "FREE").strip().upper()
+        if getattr(self, "_premium_tiers_cache", None):
+            return self._premium_tiers_cache.get(t, {"features": {}, "limits": {}})
+        try:
+            with open("config/premium_config.json", "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                self._premium_tiers_cache = cfg.get("premium_tiers", {})
+                return self._premium_tiers_cache.get(t, {})
         except Exception:
             return {"features": {}, "limits": {}}
 
@@ -796,10 +805,17 @@ async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
         return
     bot.bot_stats["messages_processed"] += 1
+    content = message.content
+    if not content:
+        return
+    # Fast-path guard: skip Context allocation if message doesn't start with prefix or bot mention
+    lower_prefix = DEFAULT_PREFIX.lower()
+    if not (content[:len(lower_prefix)].lower() == lower_prefix or content.startswith("<@")):
+        return
     ctx = await bot.get_context(message)
     if ctx.valid:
         bot.bot_stats["commands_used"] += 1
-    await bot.invoke(ctx)
+        await bot.invoke(ctx)
 
 
 async def main():

@@ -100,7 +100,14 @@ def sanitize_premium_data(data: Any) -> tuple[dict[str, Any], bool]:
     return sanitized, changed
 
 
+_PREMIUM_CACHE: dict[str, Any] | None = None
+_PREMIUM_CACHE_MTIME: float = -1.0
+_PREMIUM_CACHE_PATH: str | None = None
+
+
 def load_premium_data() -> dict[str, Any]:
+    global _PREMIUM_CACHE, _PREMIUM_CACHE_MTIME, _PREMIUM_CACHE_PATH
+
     source_path = None
     if os.path.exists(PREMIUM_DATA_PATH):
         source_path = PREMIUM_DATA_PATH
@@ -111,6 +118,19 @@ def load_premium_data() -> dict[str, Any]:
         return default_premium_data()
 
     try:
+        mtime = os.path.getmtime(source_path)
+    except OSError:
+        mtime = -1.0
+
+    if (
+        _PREMIUM_CACHE is not None
+        and _PREMIUM_CACHE_PATH == source_path
+        and mtime == _PREMIUM_CACHE_MTIME
+        and mtime >= 0
+    ):
+        return _PREMIUM_CACHE
+
+    try:
         with open(source_path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
     except (OSError, json.JSONDecodeError):
@@ -119,12 +139,24 @@ def load_premium_data() -> dict[str, Any]:
     sanitized, changed = sanitize_premium_data(data)
     if changed or source_path != PREMIUM_DATA_PATH:
         save_premium_data(sanitized)
+        return sanitized
 
+    _PREMIUM_CACHE = sanitized
+    _PREMIUM_CACHE_MTIME = mtime
+    _PREMIUM_CACHE_PATH = source_path
     return sanitized
 
 
 def save_premium_data(data: Any) -> None:
+    global _PREMIUM_CACHE, _PREMIUM_CACHE_MTIME, _PREMIUM_CACHE_PATH
     sanitized, _ = sanitize_premium_data(data)
     os.makedirs(os.path.dirname(PREMIUM_DATA_PATH), exist_ok=True)
     with open(PREMIUM_DATA_PATH, "w", encoding="utf-8") as handle:
         json.dump(sanitized, handle, indent=2, ensure_ascii=False)
+    try:
+        _PREMIUM_CACHE = sanitized
+        _PREMIUM_CACHE_PATH = PREMIUM_DATA_PATH
+        _PREMIUM_CACHE_MTIME = os.path.getmtime(PREMIUM_DATA_PATH)
+    except OSError:
+        _PREMIUM_CACHE = None
+        _PREMIUM_CACHE_MTIME = -1.0
