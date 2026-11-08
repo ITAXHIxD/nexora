@@ -267,6 +267,7 @@ EXTENSIONS = [
     "cogs.utility.poll",
     "cogs.utility.calculator",
     "cogs.utility.quote",
+    "cogs.utility.giveaway",
     "cogs.moderation.server_logs",
     "cogs.moderation.snipe",
     "cogs.moderation.voicemove",
