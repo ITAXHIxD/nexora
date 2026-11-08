@@ -96,6 +96,39 @@ STYLE_PRESETS = {
 
 
 _GIF_CACHE: dict[str, List[str]] = {}
+_ACTION_COUNTS_FILE = "data/action_counts.json"
+_ACTION_COUNTS_CACHE: Optional[dict[str, int]] = None
+
+CHAOS_ACTIONS = {"slap", "punch", "kick", "kicks", "kill", "bite", "bonk", "poke"}
+
+
+def _increment_action_count(u1_id: int, u2_id: int, action_key: str) -> int:
+    """Increment and return the pairwise action count with O(1) RAM cache."""
+    global _ACTION_COUNTS_CACHE
+    if _ACTION_COUNTS_CACHE is None:
+        try:
+            if os.path.exists(_ACTION_COUNTS_FILE):
+                with open(_ACTION_COUNTS_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    _ACTION_COUNTS_CACHE = data if isinstance(data, dict) else {}
+            else:
+                _ACTION_COUNTS_CACHE = {}
+        except Exception:
+            _ACTION_COUNTS_CACHE = {}
+
+    a, b = sorted((int(u1_id), int(u2_id)))
+    canon_action = "kick" if action_key == "kicks" else action_key
+    pair_key = f"{a}:{b}:{canon_action}"
+    count = int(_ACTION_COUNTS_CACHE.get(pair_key, 0)) + 1
+    _ACTION_COUNTS_CACHE[pair_key] = count
+
+    try:
+        os.makedirs("data", exist_ok=True)
+        with open(_ACTION_COUNTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(_ACTION_COUNTS_CACHE, f)
+    except Exception:
+        pass
+    return count
 
 
 def load_gif_list(action_key: str) -> List[str]:
@@ -129,17 +162,19 @@ class ActionLayoutView(NexoraView):
 
     def __init__(
         self,
-        author: discord.Member,
-        target: Union[discord.Member, List[discord.Member]],
+        author: Union[discord.Member, discord.User],
+        target: Union[discord.Member, discord.User, List[Union[discord.Member, discord.User]]],
         action_key: str,
         emoji: str,
         label: str,
         desc: str,
         gif_url: Optional[str] = None,
         color: int = BRAND_COLOR,
-        timeout: float = 120,
+        pair_count: int = 0,
+        timeout: float = 180,
     ):
-        super().__init__(user_id=author.id, color=color, timeout=timeout)
+        # Pass user_id=None so target users can click "{Label} Back!" and "New GIF"
+        super().__init__(user_id=None, color=color, timeout=timeout)
         self.author = author
         self.targets = target if isinstance(target, list) else [target]
         self.target = self.targets[0]
@@ -148,6 +183,8 @@ class ActionLayoutView(NexoraView):
         self.label = label
         self.desc = desc
         self.gif_url = gif_url
+        self.pair_count = pair_count
+        self._returned = False
         self._build()
 
     def _build(self):
@@ -165,8 +202,12 @@ class ActionLayoutView(NexoraView):
         self.add_section(header_text, thumbnail_url=thumb_url)
         self.add_separator(discord.SeparatorSpacing.small)
 
-        # Narrative text
-        self.add_text(f"### {self.desc}")
+        # Narrative text + optional streak counter
+        body = f"### {self.desc}"
+        if self.pair_count > 0 and len(self.targets) == 1 and self.author.id != self.targets[0].id:
+            streak_icon = "⚔️" if self.action_key in CHAOS_ACTIONS else "💞"
+            body += f"\n-# {streak_icon} **{self.author.display_name}** & **{self.targets[0].display_name}** {self.action_key} streak: **{self.pair_count}x**"
+        self.add_text(body)
 
         # Media Gallery GIF
         if self.gif_url:
@@ -180,15 +221,17 @@ class ActionLayoutView(NexoraView):
                 logger.warning("Could not attach MediaGallery GIF: %s", exc)
 
         # Footer
-        self.add_footer("Nexora Actions · Stay cute, not toxic (uwu)")
+        self.add_footer("Nexora Actions · Click the button below to retaliate or shuffle GIF!")
 
         # Action Buttons
+        base_label = STYLE_PRESETS.get(self.action_key, {}).get("label", self.action_key.capitalize())
         row = discord.ui.ActionRow()
         if any(t.id != self.author.id for t in self.targets):
             return_btn = discord.ui.Button(
-                label=f"{self.label} Back!",
+                label=f"Returned! ✨" if self._returned else f"{base_label} Back!",
                 emoji=self.emoji,
-                style=discord.ButtonStyle.primary,
+                style=discord.ButtonStyle.secondary if self._returned else discord.ButtonStyle.primary,
+                disabled=self._returned,
             )
             return_btn.callback = self._on_return_action
             row.add_item(return_btn)
@@ -223,36 +266,46 @@ class ActionLayoutView(NexoraView):
         if interaction.user.id not in target_ids:
             names = ", ".join(t.display_name for t in self.targets)
             await interaction.response.send_message(
-                f"❌ Only {names} can return this {self.label.lower()}!",
+                f"❌ Only **{names}** can return this {self.action_key}!",
                 ephemeral=True,
             )
             return
 
-        # Disable return button on the original card
-        for item in self.container.children:
-            if isinstance(item, discord.ui.ActionRow):
-                for child in item.children:
-                    if isinstance(child, discord.ui.Button) and child.label == f"{self.label} Back!":
-                        child.disabled = True
-                        child.label = f"Returned by {interaction.user.display_name} 💕"
-
+        self._returned = True
+        self._build()
         await interaction.response.edit_message(view=self)
 
-        # Send reciprocal card
+        # Send reciprocal card as a brand-new message so they can keep chaining!
         gifs = load_gif_list(self.action_key)
         new_gif = random.choice(gifs) if gifs else None
+        base_label = STYLE_PRESETS.get(self.action_key, {}).get("label", self.action_key.capitalize())
+        new_count = _increment_action_count(interaction.user.id, self.author.id, self.action_key)
+
+        if self.action_key in CHAOS_ACTIONS:
+            ret_desc = f"**{interaction.user.display_name}** retaliated and returned the {base_label.lower()} to **{self.author.display_name}**! 💥"
+        else:
+            ret_desc = f"**{interaction.user.display_name}** warmly returned the {base_label.lower()} to **{self.author.display_name}**! 💞"
 
         return_view = ActionLayoutView(
             author=interaction.user,
             target=self.author,
             action_key=self.action_key,
             emoji=self.emoji,
-            label=f"{self.label} Back",
-            desc=f"**{interaction.user.display_name}** warmly returned the {self.label.lower()} to **{self.author.display_name}**! 💞",
+            label=f"{base_label} Back",
+            desc=ret_desc,
             gif_url=new_gif,
             color=self._color,
+            pair_count=new_count,
         )
-        await interaction.followup.send(view=return_view)
+        msg = None
+        if interaction.channel:
+            try:
+                msg = await interaction.channel.send(view=return_view)
+            except Exception:
+                pass
+        if msg is None:
+            msg = await interaction.followup.send(view=return_view, wait=True)
+        return_view.message = msg
 
 
 async def send_owo_action_embed(
@@ -317,6 +370,10 @@ async def send_owo_action_embed(
     gifs = load_gif_list(action_key)
     gif_url = random.choice(gifs) if gifs else None
 
+    pair_count = 0
+    if len(targets_list) == 1 and targets_list[0].id != author.id:
+        pair_count = _increment_action_count(author.id, targets_list[0].id, action_key)
+
     view = ActionLayoutView(
         author=author,
         target=targets_list,
@@ -326,5 +383,6 @@ async def send_owo_action_embed(
         desc=desc,
         gif_url=gif_url,
         color=color_val,
+        pair_count=pair_count,
     )
     await send_view(ctx, view)

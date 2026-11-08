@@ -466,6 +466,8 @@ class CharacterBot(commands.Bot):
             "rps", "tictactoe", "connect4", "guess", "gamestats",
             # Personal Utilities
             "calc", "remind", "reminders",
+            # User Context Menus (Right-Click User -> Apps)
+            "View Avatar & Banner", "Ship With Me",
         }
         dm_install = discord.app_commands.AppInstallationType(guild=True, user=True)
         dm_context = discord.app_commands.AppCommandContext(guild=True, dm_channel=True, private_channel=True)
@@ -473,7 +475,12 @@ class CharacterBot(commands.Bot):
         guild_only_install = discord.app_commands.AppInstallationType(guild=True, user=False)
         guild_only_context = discord.app_commands.AppCommandContext(guild=True, dm_channel=False, private_channel=False)
 
-        for cmd in self.tree.get_commands():
+        all_app_cmds = (
+            list(self.tree.get_commands(type=discord.AppCommandType.chat_input))
+            + list(self.tree.get_commands(type=discord.AppCommandType.user))
+            + list(self.tree.get_commands(type=discord.AppCommandType.message))
+        )
+        for cmd in all_app_cmds:
             if cmd.name in user_app_dm_commands:
                 cmd.allowed_installs = dm_install
                 cmd.allowed_contexts = dm_context

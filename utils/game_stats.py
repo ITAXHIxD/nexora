@@ -259,3 +259,66 @@ async def set_user_stats(
             logger.warning("GameStats: MongoDB set error: %s", e)
 
     return stats_dict
+
+
+async def get_leaderboard(
+    bot,
+    game: str = "all",
+    member_ids: Optional[set[int]] = None,
+    limit: int = 10,
+) -> list[Dict[str, Any]]:
+    """
+    Return top players sorted by total wins (then win rate, then games played).
+    game can be 'all', 'tictactoe', 'connect4', 'rps', or 'guess'.
+    """
+    records: Dict[int, Dict[str, Any]] = {}
+
+    local_data = _load_local_stats()
+    for uid_str, doc in local_data.items():
+        if str(uid_str).isdigit() and isinstance(doc, dict):
+            records[int(uid_str)] = doc
+
+    mongo = getattr(bot, "mongo_db", None)
+    if mongo is not None:
+        try:
+            col = mongo["game_stats"]
+            cursor = col.find({})
+            async for doc in cursor:
+                uid = doc.get("_id")
+                if isinstance(uid, int) or (isinstance(uid, str) and uid.isdigit()):
+                    records[int(uid)] = doc
+        except Exception as e:
+            logger.warning("GameStats: MongoDB leaderboard fetch error: %s", e)
+
+    games_to_sum = ("tictactoe", "connect4", "rps", "guess") if game == "all" else (game.lower(),)
+    entries = []
+
+    for uid, doc in records.items():
+        if member_ids is not None and uid not in member_ids:
+            continue
+        wins = 0
+        played = 0
+        losses = 0
+        draws = 0
+        for g in games_to_sum:
+            g_doc = doc.get(g) or {}
+            if isinstance(g_doc, dict):
+                wins += int(g_doc.get("wins", 0))
+                played += int(g_doc.get("played", 0))
+                losses += int(g_doc.get("losses", 0))
+                draws += int(g_doc.get("draws", 0))
+        if played <= 0 and wins <= 0:
+            continue
+        wr = (wins / played * 100.0) if played > 0 else 0.0
+        entries.append({
+            "user_id": uid,
+            "wins": wins,
+            "played": played,
+            "losses": losses,
+            "draws": draws,
+            "win_rate": wr,
+        })
+
+    entries.sort(key=lambda x: (x["wins"], x["win_rate"], x["played"]), reverse=True)
+    return entries[:limit]
+

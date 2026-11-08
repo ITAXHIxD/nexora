@@ -475,6 +475,35 @@ class Avatar(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.ctx_menu_avatar = app_commands.ContextMenu(
+            name="View Avatar & Banner",
+            callback=self._context_menu_avatar,
+        )
+        self.bot.tree.add_command(self.ctx_menu_avatar)
+
+    async def cog_unload(self):
+        self.bot.tree.remove_command(self.ctx_menu_avatar.name, type=self.ctx_menu_avatar.type)
+
+    async def _context_menu_avatar(
+        self,
+        interaction: discord.Interaction,
+        user: Union[discord.Member, discord.User],
+    ):
+        await interaction.response.defer()
+        fetched_user = None
+        try:
+            fetched_user = await self.bot.fetch_user(user.id)
+        except Exception:
+            pass
+        view = AvatarView(
+            bot=self.bot,
+            target=user,
+            requester=interaction.user,
+            fetched_user=fetched_user,
+        )
+        embed = view.generate_embed()
+        msg = await interaction.followup.send(embed=embed, view=view)
+        view.message = msg
 
     @commands.hybrid_command(
         name="avatar",

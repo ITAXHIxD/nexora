@@ -22,7 +22,7 @@ import os
 import random
 import re
 from datetime import datetime, timezone
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import aiohttp
 import discord
@@ -855,6 +855,52 @@ class Ship(commands.Cog):
         self.db = getattr(bot, "mongo_db", None)
         self.ship_pairs = self.db["ship_pairs"] if self.db is not None else None
         self.ship_users = self.db["ship_users"] if self.db is not None else None
+
+        self.ctx_menu_ship = app_commands.ContextMenu(
+            name="Ship With Me",
+            callback=self._context_menu_ship,
+        )
+        self.bot.tree.add_command(self.ctx_menu_ship)
+
+    async def cog_unload(self):
+        self.bot.tree.remove_command(self.ctx_menu_ship.name, type=self.ctx_menu_ship.type)
+
+    async def _context_menu_ship(
+        self,
+        interaction: discord.Interaction,
+        target: Union[discord.Member, discord.User],
+    ):
+        if target.bot:
+            error_view = await self.build_error_view(
+                "Can't ship bots",
+                "Pick a human member for the ship result. 🤖💔",
+            )
+            return await interaction.response.send_message(view=error_view, ephemeral=True)
+
+        await interaction.response.defer()
+        m1, m2 = interaction.user, target
+        name1, name2 = m1.display_name, m2.display_name
+        id1, id2 = str(m1.id), str(m2.id)
+        pct = self.calc_pct(id1, id2)
+        await self._record_ship(
+            getattr(interaction.guild, "id", None),
+            id1, id2, name1, name2, pct, m1.id,
+        )
+        output = await self.build_output(interaction, name1, name2, pct, m1, m2)
+        view = ShipView(
+            self,
+            interaction,
+            m1,
+            m2,
+            name1,
+            name2,
+            id1,
+            id2,
+            pct,
+            is_rerolled=False,
+        )
+        msg = await interaction.followup.send(file=output["file"], view=view)
+        view.message = msg
 
     async def _record_ship(self, guild_id: Optional[int], id1: str, id2: str,
                            name1: str, name2: str, pct: int, author_id: int):
