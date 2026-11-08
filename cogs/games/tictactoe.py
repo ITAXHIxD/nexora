@@ -165,21 +165,50 @@ class TicTacToeView(NexoraView):
         is_solo: bool = False,
         difficulty: str = "medium",
         session_scores: Optional[dict] = None,
-        timeout: float = 120.0,
+        round_num: int = 1,
+        starting_player: Optional[Union[discord.Member, discord.User]] = None,
+        timeout: float = 180.0,
     ):
         super().__init__(bot=bot, color=BRAND_COLOR, timeout=timeout)
         self.player_x = player_x
         self.is_solo = is_solo
         self.difficulty = difficulty
         self.player_o = player_o or bot.user
-        self.current_player = player_x
+        self.round_num = round_num
+        self.current_player = starting_player if (not is_solo and starting_player) else player_x
         self.board: List[Optional[str]] = [None] * 9
         self.winner = None
         self.is_draw = False
+        self.rematch_started = False
         self.winning_line = None
         self.buttons: List[discord.ui.Button] = []
         self.scores = session_scores or {"X": 0, "O": 0, "draws": 0}
+        self.turn_ping_msg: Optional[discord.Message] = None
         self._build_board()
+
+    async def _clear_turn_ping(self):
+        if self.turn_ping_msg is not None:
+            try:
+                await self.turn_ping_msg.delete()
+            except Exception:
+                pass
+            self.turn_ping_msg = None
+
+    async def send_turn_ping(self, channel: Optional[discord.abc.Messageable], target_user: discord.abc.User, text: str):
+        """Send a turn/chance ping that replies directly to the match board and removes the previous turn ping."""
+        await self._clear_turn_ping()
+        if channel is None:
+            return
+        try:
+            ref = self.message.to_reference(fail_if_not_exists=False) if self.message else None
+            self.turn_ping_msg = await channel.send(
+                content=text,
+                reference=ref,
+                allowed_mentions=discord.AllowedMentions(users=[target_user], roles=False, everyone=False, replied_user=False),
+                delete_after=30,
+            )
+        except Exception:
+            pass
 
     async def _record_game_stats(self, winner_sym: Optional[str]):
         """Persist game session result via unified game stats engine."""
@@ -220,7 +249,7 @@ class TicTacToeView(NexoraView):
             )
             status_str = f"🎮 **Turn:** {p_turn} ({turn_symbol})"
 
-        score_line = f"Score: `{p_x_name}` **{self.scores['X']}**  |  `{p_o_name}` **{self.scores['O']}**  |  Draws **{self.scores['draws']}**"
+        score_line = f"Round #{self.round_num}  ·  Score: `{p_x_name}` **{self.scores['X']}**  |  `{p_o_name}` **{self.scores['O']}**  |  Draws **{self.scores['draws']}**"
 
         mode_badge = f"🤖 Solo Play ({self.difficulty.title()})" if self.is_solo else "⚔️ Multiplayer Duel"
         header = (
@@ -269,13 +298,22 @@ class TicTacToeView(NexoraView):
 
         # Bottom Action Row (Play Again / Rematch / Dismiss)
         if self.winner or self.is_draw:
-            btn_play_again = discord.ui.Button(label="Play Again", emoji="🔄", style=discord.ButtonStyle.success, custom_id="ttt-again")
-            btn_play_again.callback = self._on_play_again
-            btn_dismiss = DismissButton(user_id=self.player_x.id)
-            self.add_row(btn_play_again, btn_dismiss)
-            self.add_footer("Click 'Play Again' for an instant rematch keeping current scores!")
+            if self.rematch_started:
+                btn_done = discord.ui.Button(
+                    label="Rematch Started Below",
+                    emoji="✅",
+                    style=discord.ButtonStyle.secondary,
+                    disabled=True,
+                )
+                self.add_row(btn_done, DismissButton(user_id=self.player_x.id))
+            else:
+                btn_play_again = discord.ui.Button(label="Play Again", emoji="🔄", style=discord.ButtonStyle.success, custom_id="ttt-again")
+                btn_play_again.callback = self._on_play_again
+                btn_dismiss = DismissButton(user_id=self.player_x.id)
+                self.add_row(btn_play_again, btn_dismiss)
+            self.add_footer("Click 'Play Again' to spawn a brand-new rematch board keeping current scores!")
         else:
-            self.add_footer("90s turn timeout · Tap an open tile to make your move")
+            self.add_footer("180s turn timeout · Tap an open tile to make your move")
 
     def _find_win_combo(self) -> Tuple[Optional[str], Optional[Tuple[int, int, int]]]:
         for a, b, c in WINNING_COMBOS:
@@ -335,18 +373,17 @@ class TicTacToeView(NexoraView):
                     self.current_player = self.player_o if self.current_player == self.player_x else self.player_x
 
             self._build_board()
-            # V2 messages cannot be edited with legacy message content.
-            # Turn alerts are sent as a separate temporary channel message below.
             await interaction.response.edit_message(view=self)
 
-            if not self.is_solo and not self.winner and not self.is_draw:
-                try:
-                    await interaction.channel.send(
-                        f"🔔 {self.current_player.mention}, it's your turn in Tic-Tac-Toe! Choose your tile.",
-                        delete_after=10,
-                    )
-                except Exception:
-                    pass
+            if self.winner or self.is_draw:
+                await self._clear_turn_ping()
+            elif not self.is_solo:
+                turn_sym = "❌" if self.current_player == self.player_x else "⭕"
+                await self.send_turn_ping(
+                    interaction.channel,
+                    self.current_player,
+                    f"🎯 **Your Chance!** {self.current_player.mention} — it's your turn ({turn_sym}) in **Tic-Tac-Toe**! *(Tap an open tile on the replied board)*",
+                )
 
         return callback
 
@@ -356,25 +393,49 @@ class TicTacToeView(NexoraView):
         if interaction.user.id not in (self.player_x.id, getattr(self.player_o, "id", None)):
             return await interaction.response.send_message("❌ Only game participants can start a rematch.", ephemeral=True)
 
-        self.board = [None] * 9
-        self.winner = None
-        self.is_draw = False
-        self.winning_line = None
-        self.current_player = self.player_x
-        self._color = BRAND_COLOR
+        await self._clear_turn_ping()
+        self.rematch_started = True
         self._build_board()
+        self.stop()
         await interaction.response.edit_message(view=self)
 
-        if not self.is_solo:
-            try:
-                await interaction.channel.send(
-                    f"🔔 Rematch started! {self.current_player.mention} makes the first move (❌)!",
-                    delete_after=10,
+        next_round = self.round_num + 1
+        # Alternate who goes first in 2-player rematches so both players get fair first turns
+        next_starter = (
+            (self.player_o if next_round % 2 == 0 else self.player_x)
+            if not self.is_solo
+            else self.player_x
+        )
+
+        new_view = TicTacToeView(
+            bot=self.bot,
+            player_x=self.player_x,
+            player_o=self.player_o,
+            is_solo=self.is_solo,
+            difficulty=self.difficulty,
+            session_scores=dict(self.scores),
+            round_num=next_round,
+            starting_player=next_starter,
+        )
+        if interaction.channel:
+            ref = self.message.to_reference(fail_if_not_exists=False) if self.message else None
+            new_msg = await interaction.channel.send(
+                view=new_view,
+                reference=ref,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            new_view.message = new_msg
+
+            if not self.is_solo:
+                turn_sym = "❌" if new_view.current_player == self.player_x else "⭕"
+                await new_view.send_turn_ping(
+                    interaction.channel,
+                    new_view.current_player,
+                    f"🔄 **Rematch Round #{next_round}!** 🎯 **Your Chance:** {new_view.current_player.mention} makes the first move ({turn_sym}) on the replied board!",
                 )
-            except Exception:
-                pass
 
     async def on_timeout(self):
+        await self._clear_turn_ping()
         if not self.winner and not self.is_draw:
             self.clear_container()
             p_o_name = "Nexora AI" if self.is_solo else self.player_o.mention
@@ -445,13 +506,11 @@ class TicTacToe(commands.Cog):
             view.message = msg
 
         if not is_solo:
-            try:
-                await ctx.channel.send(
-                    f"🔔 {opponent.mention}, you were challenged to Tic-Tac-Toe by {ctx.author.mention}! {ctx.author.mention} makes the first move (❌).",
-                    delete_after=12,
-                )
-            except Exception:
-                pass
+            await view.send_turn_ping(
+                ctx.channel,
+                opponent,
+                f"⚔️ **Tic-Tac-Toe Challenge!** {opponent.mention}, you were challenged by {ctx.author.mention}! 🎯 **First Chance:** {ctx.author.mention} (❌) on the replied board!",
+            )
         logger.info(
             "TicTacToe: %s started %s game (Opponent: %s, Difficulty: %s)",
             ctx.author,

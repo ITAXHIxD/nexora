@@ -72,22 +72,51 @@ class GuessGameView(NexoraView):
         player2: Optional[discord.Member] = None,
         mode: str = "solo",  # "solo", "duel", "party"
         max_attempts: int = 6,
+        round_num: int = 1,
+        starting_player: Optional[discord.Member] = None,
         timeout: float = 180.0,
     ):
         super().__init__(bot=bot, color=BRAND_COLOR, timeout=timeout)
         self.player1 = player1
         self.player2 = player2
         self.mode = mode.lower()
+        self.round_num = round_num
         self.max_attempts = 15 if self.mode == "party" else max_attempts
         self.secret_number = random.randint(1, 100)
         self.lower_bound = 1
         self.upper_bound = 100
         self.history: List[Tuple[str, int, str]] = []  # (player_name, guess, hint)
         self.participants: Set[int] = {player1.id}
-        self.current_turn = player1
+        self.current_turn = starting_player if (self.mode == "duel" and starting_player) else player1
         self.winner: Optional[Union[discord.Member, discord.User]] = None
         self.is_game_over = False
+        self.rematch_started = False
+        self.turn_ping_msg: Optional[discord.Message] = None
         self._build_ui()
+
+    async def _clear_turn_ping(self):
+        if self.turn_ping_msg is not None:
+            try:
+                await self.turn_ping_msg.delete()
+            except Exception:
+                pass
+            self.turn_ping_msg = None
+
+    async def send_turn_ping(self, channel: Optional[discord.abc.Messageable], target_user: discord.abc.User, text: str):
+        """Send a turn/chance ping that replies directly to the active match board and cleans up the old ping."""
+        await self._clear_turn_ping()
+        if channel is None:
+            return
+        try:
+            ref = self.message.to_reference(fail_if_not_exists=False) if self.message else None
+            self.turn_ping_msg = await channel.send(
+                content=text,
+                reference=ref,
+                allowed_mentions=discord.AllowedMentions(users=[target_user], roles=False, everyone=False, replied_user=False),
+                delete_after=30,
+            )
+        except Exception:
+            pass
 
     async def _record_stats(self, winner_id: Optional[int]):
         try:
@@ -112,13 +141,13 @@ class GuessGameView(NexoraView):
         self.clear_container()
 
         if self.mode == "party":
-            title_mode = "🎉 Open Party Challenge"
+            title_mode = f"🎉 Open Party Challenge (Round #{self.round_num})"
             vs_line = f"🌐 **Open Lobby** · Anyone in this channel can guess! ({len(self.participants)} players active)"
         elif self.mode == "duel":
-            title_mode = "⚔️ 2-Player Guess Duel"
+            title_mode = f"⚔️ 2-Player Guess Duel (Round #{self.round_num})"
             vs_line = f"👤 **{self.player1.display_name}** vs 👤 **{self.player2.display_name}**"
         else:
-            title_mode = "🤖 Solo Challenge"
+            title_mode = f"🤖 Solo Challenge (Round #{self.round_num})"
             vs_line = f"👤 **{self.player1.display_name}** vs 🤖 **Nexora AI**"
 
         if self.winner:
@@ -131,7 +160,7 @@ class GuessGameView(NexoraView):
             if self.mode == "party":
                 status_line = f"🎯 **Open Turn:** Tap below to guess! · Total Attempts: **{len(self.history)}/{self.max_attempts}**"
             elif self.mode == "duel":
-                status_line = f"🎯 **Turn:** {self.current_turn.mention} · Round {len(self.history) + 1}"
+                status_line = f"🎯 **Turn:** {self.current_turn.mention} · Turn #{len(self.history) + 1}"
             else:
                 attempts_left = self.max_attempts - len(self.history)
                 status_line = f"🎯 **Turn:** {self.player1.mention} · Attempts Left: **{attempts_left}**"
@@ -162,12 +191,23 @@ class GuessGameView(NexoraView):
             footer_text = "Free for all: anyone in chat can guess!" if self.mode == "party" else "Click 'Make a Guess' to input your number"
             self.add_footer(f"{footer_text} · 180s timeout")
         else:
-            btn_again = discord.ui.Button(label="Play Again", emoji="🔄", style=discord.ButtonStyle.success)
-            btn_again.callback = self._on_play_again
-            self.add_row(btn_again, DismissButton(user_id=self.player1.id))
-            self.add_footer("Nexora Mini-Games · Challenge finished")
+            if self.rematch_started:
+                btn_done = discord.ui.Button(
+                    label="Rematch Started Below",
+                    emoji="✅",
+                    style=discord.ButtonStyle.secondary,
+                    disabled=True,
+                )
+                self.add_row(btn_done, DismissButton(user_id=self.player1.id))
+            else:
+                btn_again = discord.ui.Button(label="Play Again", emoji="🔄", style=discord.ButtonStyle.success)
+                btn_again.callback = self._on_play_again
+                self.add_row(btn_again, DismissButton(user_id=self.player1.id))
+            self.add_footer("Nexora Mini-Games · Click 'Play Again' to spawn a brand-new round!")
 
     async def _on_guess_click(self, interaction: discord.Interaction):
+        if not self.message and interaction.message:
+            self.message = interaction.message
         if self.mode == "solo":
             if interaction.user.id != self.player1.id:
                 return await interaction.response.send_message("❌ This solo game belongs to someone else.", ephemeral=True)
@@ -183,6 +223,8 @@ class GuessGameView(NexoraView):
         await interaction.response.send_modal(GuessModal(self))
 
     async def process_guess(self, interaction: discord.Interaction, guess: int):
+        if not self.message and interaction.message:
+            self.message = interaction.message
         self.participants.add(interaction.user.id)
         diff = abs(guess - self.secret_number)
 
@@ -211,40 +253,67 @@ class GuessGameView(NexoraView):
             elif self.mode == "duel":
                 # Switch turn in duel
                 self.current_turn = self.player2 if self.current_turn == self.player1 else self.player1
-                try:
-                    await interaction.channel.send(
-                        f"🔔 {self.current_turn.mention}, it's your turn to guess! (Bounds: {self.lower_bound} - {self.upper_bound})",
-                        delete_after=10,
-                    )
-                except Exception:
-                    pass
 
         self._build_ui()
         await interaction.response.edit_message(view=self)
 
+        if self.is_game_over:
+            await self._clear_turn_ping()
+        elif self.mode == "duel" and self.current_turn:
+            await self.send_turn_ping(
+                interaction.channel,
+                self.current_turn,
+                f"🎯 **Your Chance!** {self.current_turn.mention} — it's your turn to guess! (Bounds: `{self.lower_bound} – {self.upper_bound}`) *(Tap **Make a Guess** on the replied board)*",
+            )
+
     async def _on_play_again(self, interaction: discord.Interaction):
+        if not self.message and interaction.message:
+            self.message = interaction.message
         if self.mode == "duel":
             if interaction.user.id not in (self.player1.id, getattr(self.player2, "id", None)):
                 return await interaction.response.send_message("❌ Only duel players can restart.", ephemeral=True)
 
-        self.secret_number = random.randint(1, 100)
-        self.lower_bound = 1
-        self.upper_bound = 100
-        self.history = []
-        self.winner = None
-        self.is_game_over = False
-        self.current_turn = self.player1
-        self._color = BRAND_COLOR
+        await self._clear_turn_ping()
+        self.rematch_started = True
         self._build_ui()
+        self.stop()
         await interaction.response.edit_message(view=self)
-        if self.mode == "duel":
-            try:
-                await interaction.channel.send(
-                    f"🔔 Rematch started! {self.player1.mention} has the first guess!",
-                    delete_after=10,
+
+        next_round = self.round_num + 1
+        next_starter = (
+            (self.player2 if next_round % 2 == 0 and self.player2 else self.player1)
+            if self.mode == "duel"
+            else self.player1
+        )
+
+        new_view = GuessGameView(
+            bot=self.bot,
+            player1=self.player1,
+            player2=self.player2,
+            mode=self.mode,
+            max_attempts=self.max_attempts,
+            round_num=next_round,
+            starting_player=next_starter,
+        )
+        if interaction.channel:
+            ref = self.message.to_reference(fail_if_not_exists=False) if self.message else None
+            new_msg = await interaction.channel.send(
+                view=new_view,
+                reference=ref,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            new_view.message = new_msg
+
+            if self.mode == "duel" and new_view.current_turn:
+                await new_view.send_turn_ping(
+                    interaction.channel,
+                    new_view.current_turn,
+                    f"🔄 **Rematch Round #{next_round}!** 🎯 **Your Chance:** {new_view.current_turn.mention} guesses first on the replied board!",
                 )
-            except Exception:
-                pass
+
+    async def on_timeout(self):
+        await self._clear_turn_ping()
+        await super().on_timeout()
 
 
 class NumberGuess(commands.Cog):
@@ -292,13 +361,11 @@ class NumberGuess(commands.Cog):
             view.message = msg
 
         if chosen_mode == "duel" and opponent:
-            try:
-                await ctx.channel.send(
-                    f"🔔 {opponent.mention}, you were challenged to a Number Guessing Duel by {ctx.author.mention}! {ctx.author.mention} guesses first.",
-                    delete_after=12,
-                )
-            except Exception:
-                pass
+            await view.send_turn_ping(
+                ctx.channel,
+                opponent,
+                f"⚔️ **Number Guessing Duel!** {opponent.mention}, you were challenged by {ctx.author.mention}! 🎯 **First Chance:** {ctx.author.mention} guesses first on the replied board!",
+            )
         logger.info("Guess: %s launched %s game", ctx.author, chosen_mode)
 
 

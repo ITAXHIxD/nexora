@@ -187,7 +187,7 @@ def find_ai_move(board: List[List[Optional[str]]], ai_sym: str = "Y", difficulty
 # ══════════════════════════════════════════════════════════════════
 
 class Connect4View(NexoraView):
-    """Interactive Connect 4 Components V2 View."""
+    """Interactive Connect 4 Components V2 View with New-Message Rematch & Reply Turn Pings."""
 
     def __init__(
         self,
@@ -197,20 +197,49 @@ class Connect4View(NexoraView):
         is_solo: bool = True,
         difficulty: str = "medium",
         session_scores: Optional[dict] = None,
-        timeout: float = 120.0,
+        round_num: int = 1,
+        starting_turn: str = "R",
+        timeout: float = 180.0,
     ):
         super().__init__(bot=bot, color=BRAND_COLOR, timeout=timeout)
         self.player_r = player_r
         self.player_y = player_y or bot.user
         self.is_solo = is_solo
         self.difficulty = difficulty
+        self.round_num = round_num
         self.board = create_board()
-        self.current_turn = "R"  # 'R' (Red) goes first
+        self.current_turn = starting_turn if not is_solo else "R"
         self.winner_sym: Optional[str] = None
         self.winning_coords: List[Tuple[int, int]] = []
         self.is_draw = False
+        self.rematch_started = False
         self.scores = session_scores or {"R": 0, "Y": 0, "draws": 0}
+        self.turn_ping_msg: Optional[discord.Message] = None
         self._build_ui()
+
+    async def _clear_turn_ping(self):
+        if self.turn_ping_msg is not None:
+            try:
+                await self.turn_ping_msg.delete()
+            except Exception:
+                pass
+            self.turn_ping_msg = None
+
+    async def send_turn_ping(self, channel: Optional[discord.abc.Messageable], target_user: discord.abc.User, text: str):
+        """Send a turn/chance ping that replies directly to the active match board and cleans up the old ping."""
+        await self._clear_turn_ping()
+        if channel is None:
+            return
+        try:
+            ref = self.message.to_reference(fail_if_not_exists=False) if self.message else None
+            self.turn_ping_msg = await channel.send(
+                content=text,
+                reference=ref,
+                allowed_mentions=discord.AllowedMentions(users=[target_user], roles=False, everyone=False, replied_user=False),
+                delete_after=30,
+            )
+        except Exception:
+            pass
 
     async def _record_stats(self, winner: Optional[str]):
         """Persist game session result via unified game stats engine."""
@@ -270,7 +299,7 @@ class Connect4View(NexoraView):
                 turn_str = "🟡 **Turn:** 🤖 *Nexora AI thinking...*" if self.is_solo else f"🟡 **Turn:** {self.player_y.mention}"
             status_str = turn_str
 
-        score_line = f"Score: `{p_r_name}` **{self.scores['R']}**  |  `{p_y_name}` **{self.scores['Y']}**  |  Draws **{self.scores['draws']}**"
+        score_line = f"Round #{self.round_num}  ·  Score: `{p_r_name}` **{self.scores['R']}**  |  `{p_y_name}` **{self.scores['Y']}**  |  Draws **{self.scores['draws']}**"
         mode_label = f"🤖 Solo Play ({self.difficulty.title()})" if self.is_solo else "⚔️ Multiplayer Duel"
 
         header = (
@@ -315,13 +344,22 @@ class Connect4View(NexoraView):
                 row2_btns.append(btn)
             self.add_row(*row2_btns)
 
-            self.add_footer("Tap a column number (1-7) to drop your chip · 120s timeout")
+            self.add_footer("Tap a column number (1-7) to drop your chip · 180s timeout")
         else:
-            btn_again = discord.ui.Button(label="Play Again", emoji="🔄", style=discord.ButtonStyle.success)
-            btn_again.callback = self._on_play_again
-            btn_dismiss = DismissButton(user_id=self.player_r.id)
-            self.add_row(btn_again, btn_dismiss)
-            self.add_footer("Nexora Mini-Games · Click 'Play Again' for an instant rematch!")
+            if self.rematch_started:
+                btn_done = discord.ui.Button(
+                    label="Rematch Started Below",
+                    emoji="✅",
+                    style=discord.ButtonStyle.secondary,
+                    disabled=True,
+                )
+                self.add_row(btn_done, DismissButton(user_id=self.player_r.id))
+            else:
+                btn_again = discord.ui.Button(label="Play Again", emoji="🔄", style=discord.ButtonStyle.success)
+                btn_again.callback = self._on_play_again
+                btn_dismiss = DismissButton(user_id=self.player_r.id)
+                self.add_row(btn_again, btn_dismiss)
+            self.add_footer("Nexora Mini-Games · Click 'Play Again' to spawn a brand-new rematch board!")
 
     def _make_drop_callback(self, col: int):
         async def callback(interaction: discord.Interaction):
@@ -378,18 +416,17 @@ class Connect4View(NexoraView):
 
             self._build_ui()
             next_user = self.player_r if self.current_turn == "R" else self.player_y
-            # V2 messages cannot be edited with legacy message content.
-            # Turn alerts are sent as a separate temporary channel message below.
             await interaction.response.edit_message(view=self)
 
-            if not self.is_solo and not self.winner_sym and not self.is_draw:
-                try:
-                    await interaction.channel.send(
-                        f"🔔 {next_user.mention}, it's your turn in Connect 4! Choose column (1-7).",
-                        delete_after=10,
-                    )
-                except Exception:
-                    pass
+            if self.winner_sym or self.is_draw:
+                await self._clear_turn_ping()
+            elif not self.is_solo:
+                chip_badge = "🔴 Red" if self.current_turn == "R" else "🟡 Yellow"
+                await self.send_turn_ping(
+                    interaction.channel,
+                    next_user,
+                    f"🎯 **Your Chance!** {next_user.mention} — it's your turn ({chip_badge}) in **Connect 4**! *(Drop a chip in columns 1–7 on the replied board)*",
+                )
 
         return callback
 
@@ -399,23 +436,46 @@ class Connect4View(NexoraView):
         if interaction.user.id not in (self.player_r.id, getattr(self.player_y, "id", None)):
             return await interaction.response.send_message("❌ Only game participants can start a rematch.", ephemeral=True)
 
-        self.board = create_board()
-        self.winner_sym = None
-        self.winning_coords = []
-        self.is_draw = False
-        self.current_turn = "R"
-        self._color = BRAND_COLOR
+        await self._clear_turn_ping()
+        self.rematch_started = True
         self._build_ui()
+        self.stop()
         await interaction.response.edit_message(view=self)
 
-        if not self.is_solo:
-            try:
-                await interaction.channel.send(
-                    f"🔔 Rematch started! {self.player_r.mention} drops first (🔴)!",
-                    delete_after=10,
+        next_round = self.round_num + 1
+        next_turn = ("Y" if next_round % 2 == 0 else "R") if not self.is_solo else "R"
+
+        new_view = Connect4View(
+            bot=self.bot,
+            player_r=self.player_r,
+            player_y=self.player_y,
+            is_solo=self.is_solo,
+            difficulty=self.difficulty,
+            session_scores=dict(self.scores),
+            round_num=next_round,
+            starting_turn=next_turn,
+        )
+        if interaction.channel:
+            ref = self.message.to_reference(fail_if_not_exists=False) if self.message else None
+            new_msg = await interaction.channel.send(
+                view=new_view,
+                reference=ref,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            new_view.message = new_msg
+
+            if not self.is_solo:
+                starter = self.player_r if next_turn == "R" else self.player_y
+                chip_badge = "🔴 Red" if next_turn == "R" else "🟡 Yellow"
+                await new_view.send_turn_ping(
+                    interaction.channel,
+                    starter,
+                    f"🔄 **Rematch Round #{next_round}!** 🎯 **Your Chance:** {starter.mention} drops first ({chip_badge}) on the replied board!",
                 )
-            except Exception:
-                pass
+
+    async def on_timeout(self):
+        await self._clear_turn_ping()
+        await super().on_timeout()
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -472,13 +532,11 @@ class Connect4(commands.Cog):
             view.message = msg
 
         if not is_solo:
-            try:
-                await ctx.channel.send(
-                    f"🔔 {opponent.mention}, you were challenged to Connect 4 by {ctx.author.mention}! {ctx.author.mention} drops first (🔴).",
-                    delete_after=12,
-                )
-            except Exception:
-                pass
+            await view.send_turn_ping(
+                ctx.channel,
+                opponent,
+                f"⚔️ **Connect 4 Challenge!** {opponent.mention}, you were challenged by {ctx.author.mention}! 🎯 **First Chance:** {ctx.author.mention} (🔴 Red) on the replied board!",
+            )
         logger.info(
             "Connect4: %s started %s game (Opponent: %s, Diff: %s)",
             ctx.author,
