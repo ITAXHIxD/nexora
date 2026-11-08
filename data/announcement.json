@@ -1,0 +1,78 @@
+{
+  "content": "",
+  "embeds": [
+    {
+      "title": "🚀 NEXORA v3.5.0-PRO IS OFFICIALLY HERE!",
+      "description": "**The next evolution of your Discord experience!** 🌌\n\nNEXORA v3.5.0-PRO brings Discord DMs and User Apps, interactive giveaways, competitive leaderboards, automated birthday celebrations, and major performance improvements.\n\nHere's what's new! 👇",
+      "color": 5763719,
+      "fields": [
+        {
+          "name": "📱 1. NEXORA — Available Everywhere",
+          "value": "Install NEXORA directly to your Discord account!\n\n• 33 curated commands available in DMs and Group DMs.\n• Play `/rps`, `/tictactoe`, `/connect4`, `/guess`.\n• Use `/avatar`, `/userinfo`, `/calc`, `/remind`, `/meme` and `/ship`.\n• Server moderation and administration remain server-only.",
+          "inline": false
+        },
+        {
+          "name": "🎁 2. Interactive Giveaway Engine",
+          "value": "**Setup:** `/giveaway` or `n!giveaway`\n• Interactive channel and role selection.\n• Modal-based configuration.\n• Quick launch: `n!gstart 1h Discord Nitro`.\n\n**Live controls:** 🎉 Enter • 👥 Participants • 🛑 End Early • 🎲 Reroll Winner\n\nMongoDB Atlas and RAM caching support giveaway recovery after restarts.",
+          "inline": false
+        }
+      ],
+      "footer": {
+        "text": "NEXORA v3.5.0-PRO • Major Feature Upgrade"
+      }
+    },
+    {
+      "title": "🏆 COMPETE. CELEBRATE. PLAY.",
+      "description": "Discover the interactive features powering your NEXORA experience.",
+      "color": 5793266,
+      "fields": [
+        {
+          "name": "🏆 3. Interactive Game Leaderboards",
+          "value": "Use `/gamestats`, `n!leaderboard` or `n!lb` to view the Top 10 rankings.\n\nCategories: Overall, Tic-Tac-Toe, Connect Four, Rock-Paper-Scissors and Number Guesser.\n\nSwitch between 🏰 Server Rankings and 🌍 Global Rankings.",
+          "inline": false
+        },
+        {
+          "name": "🎂 4. Midnight Birthday System",
+          "value": "Automated birthday announcements at **00:00 midnight**, based on each server's configured timezone.\n\nSetup: `/introbdsetup` or `n!bdaysetup`.\n\nConfigure announcement channels, introduction channels, timezone offsets and birthday roles. Includes duplicate-announcement protection.",
+          "inline": false
+        },
+        {
+          "name": "🎮 5. Infinite Rematches & Cleaner Notifications",
+          "value": "Play Again / Rematch creates fresh sessions for RPS, Tic-Tac-Toe, Connect Four and Number Guesser.\n\nTurn alerts reply directly to game boards, while previous notifications are cleaned up to keep chats tidy.",
+          "inline": false
+        }
+      ],
+      "footer": {
+        "text": "NEXORA • More ways to compete and connect"
+      }
+    },
+    {
+      "title": "⚡ MORE POWER. MORE INTERACTION.",
+      "description": "Social features and performance improvements in one major upgrade.",
+      "color": 3447003,
+      "fields": [
+        {
+          "name": "🥊 6. Action Retaliation & Discord User Apps",
+          "value": "Commands such as `n!hug`, `n!slap` and `n!punch` now support interactive retaliation.\n\n• Click **{Action} Back!** to retaliate.\n• Continue chains and track live interaction streaks.\n\n**User Apps:** Right-click a user → Apps → Ship With Me or View Avatar & Banner.",
+          "inline": false
+        },
+        {
+          "name": "⚡ 7. Faster Engine & Hot Reloading",
+          "value": "Optimized in-memory caching for AFK, reminders, action commands and mini-games.\n\nUse `n!owner` for the owner panel or `n!reload` to apply supported updates without a complete bot restart.",
+          "inline": false
+        },
+        {
+          "name": "🌌 THE NEXT CHAPTER STARTS NOW!",
+          "value": "Run `/help` or `n!help` to explore the updated commands and features.\n\nThank you for being part of the NEXORA community! ❤️\n\n**— Team NEXORA**",
+          "inline": false
+        }
+      ],
+      "footer": {
+        "text": "NEXORA v3.5.0-PRO • Your Discord. Your Experience. Your NEXORA. 🚀"
+      }
+    }
+  ],
+  "allowed_mentions": {
+    "parse": []
+  }
+}
